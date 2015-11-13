@@ -5,23 +5,28 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.res.Resources;
 import android.os.*;
+import android.util.Base64;
 import android.util.Log;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.RadioButton;
 import android.widget.Toast;
 import com.google.inject.Inject;
+import libcore.io.IoUtils;
 import org.strongswan.android.ipc.VpnProfileCrudService;
 import roboguice.activity.RoboActivity;
 import roboguice.inject.ContentView;
 import roboguice.inject.InjectView;
 
+
+import java.io.File;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
 @ContentView(R.layout.api_client_activity)
 public class ApiClientActivity extends RoboActivity {
-
     public static final String TAG = "strongSwanApiClient";
     public static final int SERVICE_IPC_TYPE = 0;
     public static final int MESSENGER_IPC_TYPE = 1;
@@ -38,6 +43,7 @@ public class ApiClientActivity extends RoboActivity {
     private VpnProfileCrudService service;
     private Messenger messenger;
     private int ipcType;
+    private  ArrayList<String>allowedApps;
 
     private Messenger returnMessenger = new Messenger(new Handler() {
         @Override
@@ -65,6 +71,11 @@ public class ApiClientActivity extends RoboActivity {
             }
         }
     });
+
+    //  Max bundle size is 1 MB, some checking later
+    private String getCertificateBase64String(String  path) throws Exception {
+           return Base64.encodeToString(IoUtils.readFileAsByteArray(path) , Base64.DEFAULT);
+    }
 
     private ServiceConnection vpnProfileCrudServiceConnection = new ServiceConnection() {
 
@@ -187,18 +198,15 @@ public class ApiClientActivity extends RoboActivity {
 
     private void logAndToastVpnProfileBundle(Bundle bundle) {
         long mId = bundle.getLong(resources.getString(R.string.vpn_profile_bundle_id_key));
-        String mCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_alias_key));
         String mGateway = bundle.getString(resources.getString(R.string.vpn_profile_bundle_gateway_key));
         String mName = bundle.getString(resources.getString(R.string.vpn_profile_bundle_name_key));
         String mPassword = bundle.getString(resources.getString(R.string.vpn_profile_bundle_password_key));
         String mVpnType = bundle.getString(resources.getString(R.string.vpn_profile_bundle_type_key));
-        String mUserCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key));
         String mUsername = bundle.getString(resources.getString(R.string.vpn_profile_bundle_username_key));
         logAndToast("VpnProfile: id: " + mId + ", name: " + mName + ", gateway: " + mGateway + ", type: " + mVpnType +
                 ", pass: " + (mPassword == null ? "null" : mPassword) +
-                ", user: " + (mUsername == null ? "null" : mUsername) +
-                ", cert: " + (mCertificate == null ? "null" : mCertificate) +
-                ", userCert: " + (mUserCertificate == null ? "null" : mUserCertificate));
+                ", user: " + (mUsername == null ? "null" : mUsername)  );
+
     }
 
     public void clickDisconnectFromStrongSwan(View view) {
@@ -213,7 +221,9 @@ public class ApiClientActivity extends RoboActivity {
     }
 
     public void clickCreateVpnProfile(View view) {
-        Bundle eapBundle = getEapBundle();
+        allowedApps=new ArrayList<String>();
+        allowedApps.add( packageNameEditText.getText().toString());
+       Bundle eapBundle = getEapBundle();
         Bundle certBundle = getCertBundle();
         if (ipcType == MESSENGER_IPC_TYPE) {
             if (messenger != null) {
@@ -256,6 +266,8 @@ public class ApiClientActivity extends RoboActivity {
         }
     }
 
+
+
     private Bundle getEapBundle() {
         Bundle vpnProfile = new Bundle();
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_name_key), "eap famocvpn");
@@ -263,7 +275,7 @@ public class ApiClientActivity extends RoboActivity {
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_username_key), "john");
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_password_key), "haslo123");
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_type_key), resources.getString(R.string.vpn_profile_bundle_type_ikev2_eap_value));
-        vpnProfile.getString(resources.getString(R.string.vpn_profile_bundle_allowed_applications), packageNameEditText.getText().toString());
+        vpnProfile.putStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications), allowedApps);
         return vpnProfile;
     }
 
@@ -272,10 +284,30 @@ public class ApiClientActivity extends RoboActivity {
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_name_key), "cert famocvpn");
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_gateway_key), "famocvpn.emdmcloud.com");
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_type_key), resources.getString(R.string.vpn_profile_bundle_type_ikev2_cert_value));
-        vpnProfile.getString(resources.getString(R.string.vpn_profile_bundle_certificate_alias_key), "john");
-        vpnProfile.getString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key), "john");
-        vpnProfile.getString(resources.getString(R.string.vpn_profile_bundle_allowed_applications), packageNameEditText.getText().toString());
+        vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_user_certificate_password_key), "haslo25@%");
+        vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_certificate_key),getCaCertificate() );
+        vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_user_certificate_key), getUserCertificate());
+
+        vpnProfile.putStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications),allowedApps );
         return vpnProfile;
+    }
+
+    private String getCaCertificate() {
+        try {
+         return    getCertificateBase64String(Environment.getExternalStorageDirectory()+File.separator+ "strongSwan_Root_CA.pem");
+        } catch ( Exception e) {
+            logAndToast("Error when parsing Ca Certificate,  sending null in bundle ",e);
+            return null;
+        }
+    }
+
+    private String getUserCertificate() {
+        try {
+            return    getCertificateBase64String(Environment.getExternalStorageDirectory()+ File.separator+"strongswan.p12");
+        } catch ( Exception e) {
+            logAndToast("Error when parsing user certificate,  sending null in bundle ", e);
+            return null;
+        }
     }
 
     private int getInteger(int id) {

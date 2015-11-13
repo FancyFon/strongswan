@@ -8,11 +8,11 @@ package org.strongswan.android.ipc;
 import android.app.Service;
 import android.content.Intent;
 import android.os.*;
+import android.util.Base64;
 import android.util.Log;
-import libcore.io.IoUtils;
 import org.strongswan.android.R;
 import org.strongswan.android.security.LocalKeystore;
-
+import libcore.io.IoUtils;
 import java.io.IOException;
 import java.security.KeyStoreException;
 import java.util.List;
@@ -81,26 +81,40 @@ public class VpnProfileCrudServiceImpl extends Service {
 
     };
 
-    private void installCertificatesFromProfile(Bundle vpnProfile) {
+
+
+    private void installCertificatesFromProfile(Bundle vpnProfileBundle) {
         try {
-            createLocalKeystore();
-            String id = localKeystore.generateId();
-            //TODO: Read certificate bytes from sent bundle instead of file
-            String userAlias = localKeystore.addPkcs12(IoUtils.readFileAsByteArray(Environment.getExternalStorageDirectory
-                            () + "/John.p12"), "SECRET_PASSWORD", id);
-            //TODO: Read certificate bytes from sent bundle instead of file
-            String certAlias = localKeystore.addCaCertificate(IoUtils.readFileAsByteArray(Environment
-                    .getExternalStorageDirectory() + "/rootca.pem"), id);
-            vpnProfile.putString(getResources().getString(R.string.vpn_profile_bundle_certificate_id_key), id);
-            vpnProfile.putString(getResources().getString(R.string.vpn_profile_bundle_user_certificate_alias_key),
-                    userAlias);
-            vpnProfile.putString(getResources().getString(R.string.vpn_profile_bundle_certificate_alias_key),
-                    certAlias);
-        } catch (KeyStoreException e) {
-            Log.e(TAG, "Error installing certificate: " + e);
-        } catch (IOException e) {
+
+                createLocalKeystore();
+                String id = localKeystore.generateId();
+                String userAlias = localKeystore.addPkcs12(extractCertificateFromBundle(vpnProfileBundle, R.string.vpn_profile_bundle_user_certificate_key),
+                        vpnProfileBundle.getString(getResources().getString(R.string.vpn_profile_bundle_user_certificate_password_key)), id);
+                String certAlias = localKeystore.addCaCertificate(extractCertificateFromBundle(vpnProfileBundle, R.string.vpn_profile_bundle_certificate_key), id);
+
+                vpnProfileBundle.putString(getResources().getString(R.string.vpn_profile_bundle_certificate_id_key), id);
+                vpnProfileBundle.putString(getResources().getString(R.string.vpn_profile_bundle_user_certificate_alias_key),
+                        userAlias);
+                vpnProfileBundle.putString(getResources().getString(R.string.vpn_profile_bundle_certificate_alias_key),
+                        certAlias);
+
+        } catch (Throwable e) {
             Log.e(TAG, "Error installing certificate: " + e);
         }
+    }
+
+
+
+
+    private   byte[] extractCertificateFromBundle(Bundle vpnProfile, int certificateResourceId) throws KeyStoreException {
+           try {
+               return Base64.decode(vpnProfile.getString(getResources().getString(certificateResourceId)), Base64.DEFAULT);
+           }catch (Throwable t){
+              Log.d(TAG,"Can't parse certificate "+t);
+               return null;
+
+           }
+
     }
 
     private void createLocalKeystore() throws KeyStoreException {

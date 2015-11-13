@@ -552,7 +552,7 @@ public class CharonVpnService extends VpnService implements Runnable
 				ArrayList<String> allowedApplications = profile.getAllowedApplications();
 				for (String s : allowedApplications) {
 					try {
-						mBuilder.addAllowedApplication(s);
+						builder.addAllowedApplication(s);
 					} catch (PackageManager.NameNotFoundException ex) {
 						Log.w(TAG, "Failed to add packageName: " + s + " to allowed applications list for vpn profile: " + mName, ex);
 					}

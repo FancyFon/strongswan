@@ -195,6 +195,6 @@ public class VpnProfile implements Cloneable
         mUserCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key));
         mUsername = bundle.getString(resources.getString(R.string.vpn_profile_bundle_username_key));
 		mCertificateId = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key));
- 		allowedApplications = bundle.getStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications));
+ 		allowedApplications=bundle.getStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications));
     }
 }
