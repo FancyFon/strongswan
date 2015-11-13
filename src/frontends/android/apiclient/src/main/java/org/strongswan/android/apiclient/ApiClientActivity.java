@@ -284,7 +284,7 @@ public class ApiClientActivity extends RoboActivity {
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_name_key), "cert famocvpn");
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_gateway_key), "famocvpn.emdmcloud.com");
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_type_key), resources.getString(R.string.vpn_profile_bundle_type_ikev2_cert_value));
-        vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_user_certificate_password_key), "haslo25@%");
+        vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_user_certificate_password_key), "MAGIC_PASSWORD");
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_certificate_key),getCaCertificate() );
         vpnProfile.putString(resources.getString(R.string.vpn_profile_bundle_user_certificate_key), getUserCertificate());
 
