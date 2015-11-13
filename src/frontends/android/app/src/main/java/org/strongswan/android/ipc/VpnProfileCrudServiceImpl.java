@@ -7,11 +7,14 @@ package org.strongswan.android.ipc;
 
 import android.app.Service;
 import android.content.Intent;
-import android.os.Binder;
-import android.os.Bundle;
-import android.os.IBinder;
-import android.os.RemoteException;
-
+import android.os.*;
+import android.util.Base64;
+import android.util.Log;
+import org.strongswan.android.R;
+import org.strongswan.android.security.LocalKeystore;
+import libcore.io.IoUtils;
+import java.io.IOException;
+import java.security.KeyStoreException;
 import java.util.List;
 
 /**
@@ -19,9 +22,11 @@ import java.util.List;
  */
 public class VpnProfileCrudServiceImpl extends Service {
 
+    private static final String TAG = VpnProfileCrudServiceImpl.class.getSimpleName();
     public static final String VPN_PROFILE_CRUD_LOCAL_ACTION = "org.strongswan.android.action.BIND_VPN_PROFILE_CRUD_SERVICE_LOCAL";
     private LocalBinder localBinder = new LocalBinder();
     private VpnProfileCrud vpnProfileCrud;
+    private LocalKeystore localKeystore;
 
     @Override
     public void onCreate() {
@@ -45,6 +50,7 @@ public class VpnProfileCrudServiceImpl extends Service {
 
         @Override
         public boolean createVpnProfile(Bundle vpnProfile) throws RemoteException {
+            installCertificatesFromProfile(vpnProfile);
             return vpnProfileCrud.createVpnProfile(vpnProfile);
         }
 
@@ -75,6 +81,47 @@ public class VpnProfileCrudServiceImpl extends Service {
 
     };
 
+
+
+    private void installCertificatesFromProfile(Bundle vpnProfileBundle) {
+        try {
+
+                createLocalKeystore();
+                String id = localKeystore.generateId();
+                String userAlias = localKeystore.addPkcs12(extractCertificateFromBundle(vpnProfileBundle, R.string.vpn_profile_bundle_user_certificate_key),
+                        vpnProfileBundle.getString(getResources().getString(R.string.vpn_profile_bundle_user_certificate_password_key)), id);
+                String certAlias = localKeystore.addCaCertificate(extractCertificateFromBundle(vpnProfileBundle, R.string.vpn_profile_bundle_certificate_key), id);
+
+                vpnProfileBundle.putString(getResources().getString(R.string.vpn_profile_bundle_certificate_id_key), id);
+                vpnProfileBundle.putString(getResources().getString(R.string.vpn_profile_bundle_user_certificate_alias_key),
+                        userAlias);
+                vpnProfileBundle.putString(getResources().getString(R.string.vpn_profile_bundle_certificate_alias_key),
+                        certAlias);
+
+        } catch (Throwable e) {
+            Log.e(TAG, "Error installing certificate: " + e);
+        }
+    }
+
+
+
+
+    private   byte[] extractCertificateFromBundle(Bundle vpnProfile, int certificateResourceId) throws KeyStoreException {
+           try {
+               return Base64.decode(vpnProfile.getString(getResources().getString(certificateResourceId)), Base64.DEFAULT);
+           }catch (Throwable t){
+              Log.d(TAG,"Can't parse certificate "+t);
+               return null;
+
+           }
+
+    }
+
+    private void createLocalKeystore() throws KeyStoreException {
+        if(localKeystore == null) {
+            localKeystore = new LocalKeystore();
+        }
+    }
 
     @Override
     public IBinder onBind(Intent intent) {

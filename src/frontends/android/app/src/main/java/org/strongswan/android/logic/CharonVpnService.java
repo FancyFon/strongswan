@@ -18,6 +18,7 @@
 package org.strongswan.android.logic;
 
 import java.io.File;
+import java.security.KeyStoreException;
 import java.security.PrivateKey;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
@@ -32,6 +33,7 @@ import org.strongswan.android.logic.VpnStateService.ErrorState;
 import org.strongswan.android.logic.VpnStateService.State;
 import org.strongswan.android.logic.imc.ImcState;
 import org.strongswan.android.logic.imc.RemediationInstruction;
+import org.strongswan.android.security.LocalKeystore;
 import org.strongswan.android.ui.MainActivity;
 
 import android.app.PendingIntent;
@@ -45,11 +47,8 @@ import android.net.VpnService;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.os.ParcelFileDescriptor;
-import android.security.KeyChain;
 import android.security.KeyChainException;
 import android.util.Log;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public class CharonVpnService extends VpnService implements Runnable
 {
@@ -60,6 +59,7 @@ public class CharonVpnService extends VpnService implements Runnable
 	private VpnProfileDataSource mDataSource;
 	private Thread mConnectionHandler;
 	private VpnProfile mCurrentProfile;
+	private volatile String mCurrentCertificateId;
 	private volatile String mCurrentCertificateAlias;
 	private volatile String mCurrentUserCertificateAlias;
 	private VpnProfile mNextProfile;
@@ -209,6 +209,7 @@ public class CharonVpnService extends VpnService implements Runnable
 
 						/* store this in a separate (volatile) variable to avoid
 						 * a possible deadlock during deinitialization */
+						mCurrentCertificateId = mCurrentProfile.getCertificateId();
 						mCurrentCertificateAlias = mCurrentProfile.getCertificateAlias();
 						mCurrentUserCertificateAlias = mCurrentProfile.getUserCertificateAlias();
 
@@ -431,29 +432,18 @@ public class CharonVpnService extends VpnService implements Runnable
 	private byte[][] getTrustedCertificates()
 	{
 		ArrayList<byte[]> certs = new ArrayList<byte[]>();
-		TrustedCertificateManager certman = TrustedCertificateManager.getInstance();
 		try
 		{
-			String alias = this.mCurrentCertificateAlias;
-			if (alias != null)
-			{
-				X509Certificate cert = certman.getCACertificateFromAlias(alias);
-				if (cert == null)
-				{
-					return null;
-				}
-				certs.add(cert.getEncoded());
-			}
-			else
-			{
-				for (X509Certificate cert : certman.getAllCACertificates().values())
-				{
-					certs.add(cert.getEncoded());
-				}
-			}
+			LocalKeystore keystore = new LocalKeystore();
+			X509Certificate cert = keystore.getCertificate(mCurrentCertificateId,
+				mCurrentCertificateAlias);
+			certs.add(cert.getEncoded());
 		}
 		catch (CertificateEncodingException e)
 		{
+			e.printStackTrace();
+			return null;
+		} catch (KeyStoreException e) {
 			e.printStackTrace();
 			return null;
 		}
@@ -475,7 +465,13 @@ public class CharonVpnService extends VpnService implements Runnable
 	private byte[][] getUserCertificate() throws KeyChainException, InterruptedException, CertificateEncodingException
 	{
 		ArrayList<byte[]> encodings = new ArrayList<byte[]>();
-		X509Certificate[] chain = KeyChain.getCertificateChain(getApplicationContext(), mCurrentUserCertificateAlias);
+		X509Certificate[] chain = null;
+		try {
+			LocalKeystore localKeystore = new LocalKeystore();
+			chain = localKeystore.getCertificateChain(mCurrentCertificateId, mCurrentUserCertificateAlias);
+		} catch (KeyStoreException e) {
+			throw new KeyChainException();
+		}
 		if (chain == null || chain.length == 0)
 		{
 			return null;
@@ -496,12 +492,15 @@ public class CharonVpnService extends VpnService implements Runnable
 	 * @return the private key
 	 * @throws InterruptedException
 	 * @throws KeyChainException
-	 * @throws CertificateEncodingException
 	 */
 	private PrivateKey getUserKey() throws KeyChainException, InterruptedException
 	{
-		return KeyChain.getPrivateKey(getApplicationContext(), mCurrentUserCertificateAlias);
-
+		try {
+			LocalKeystore localKeystore = new LocalKeystore();
+			return localKeystore.getPrivateKey(mCurrentCertificateId, mCurrentUserCertificateAlias);
+		} catch (KeyStoreException e) {
+			throw new KeyChainException();
+		}
 	}
 
 	/**
@@ -553,7 +552,7 @@ public class CharonVpnService extends VpnService implements Runnable
 				ArrayList<String> allowedApplications = profile.getAllowedApplications();
 				for (String s : allowedApplications) {
 					try {
-						mBuilder.addAllowedApplication(s);
+						builder.addAllowedApplication(s);
 					} catch (PackageManager.NameNotFoundException ex) {
 						Log.w(TAG, "Failed to add packageName: " + s + " to allowed applications list for vpn profile: " + mName, ex);
 					}
