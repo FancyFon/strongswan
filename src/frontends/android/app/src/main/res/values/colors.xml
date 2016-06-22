@@ -39,4 +39,7 @@
         name="panel_separator">#5a5a5a</color>
 
     <color
-        name="pressed">#5a5a5a</color></resources>
+        name="pressed">#5a5a5a</color>
+
+    <color
+        name="inactive_in_release">#5a5a5a</color></resources>
