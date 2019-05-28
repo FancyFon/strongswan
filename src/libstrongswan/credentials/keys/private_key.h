@@ -1,6 +1,7 @@
 /*
+ * Copyright (C) 2017 Tobias Brunner
  * Copyright (C) 2007 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -39,14 +40,28 @@ struct private_key_t {
 	key_type_t (*get_type)(private_key_t *this);
 
 	/**
+	 * Get signature schemes supported by this key.
+	 *
+	 * This is useful for keys that only support certain hash algorithms or
+	 * require specific parameters for RSA/PSS signatures.
+	 *
+	 * @note Implementing this method is optional. If multiple schemes are
+	 * returned, they should be ordered by decreasing preference.
+	 *
+	 * @return			enumerator over signature_params_t*
+	 */
+	enumerator_t *(*supported_signature_schemes)(private_key_t *this);
+
+	/**
 	 * Create a signature over a chunk of data.
 	 *
 	 * @param scheme	signature scheme to use
+	 * @param params	optional parameters required by the specified scheme
 	 * @param data		chunk of data to sign
 	 * @param signature	where to allocate created signature
 	 * @return			TRUE if signature created
 	 */
-	bool (*sign)(private_key_t *this, signature_scheme_t scheme,
+	bool (*sign)(private_key_t *this, signature_scheme_t scheme, void *params,
 				 chunk_t data, chunk_t *signature);
 	/**
 	 * Decrypt a chunk of data.

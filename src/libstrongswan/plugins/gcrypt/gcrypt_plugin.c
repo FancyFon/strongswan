@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2009 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -43,10 +43,12 @@ struct private_gcrypt_plugin_t {
 	gcrypt_plugin_t public;
 };
 
+#if GCRYPT_VERSION_NUMBER < 0x010600
 /**
  * Define gcrypt multi-threading callbacks as gcry_threads_pthread
  */
 GCRY_THREAD_OPTION_PTHREAD_IMPL;
+#endif
 
 METHOD(plugin_t, get_name, char*,
 	private_gcrypt_plugin_t *this)
@@ -118,6 +120,28 @@ METHOD(plugin_t, get_features, int,
 			PLUGIN_PROVIDE(PRIVKEY, KEY_RSA),
 		PLUGIN_REGISTER(PRIVKEY_GEN, gcrypt_rsa_private_key_gen, FALSE),
 			PLUGIN_PROVIDE(PRIVKEY_GEN, KEY_RSA),
+		/* signature schemes, private */
+#if GCRYPT_VERSION_NUMBER >= 0x010700
+		PLUGIN_PROVIDE(PRIVKEY_SIGN, SIGN_RSA_EMSA_PSS),
+#endif
+		PLUGIN_PROVIDE(PRIVKEY_SIGN, SIGN_RSA_EMSA_PKCS1_NULL),
+		PLUGIN_PROVIDE(PRIVKEY_SIGN, SIGN_RSA_EMSA_PKCS1_SHA2_224),
+		PLUGIN_PROVIDE(PRIVKEY_SIGN, SIGN_RSA_EMSA_PKCS1_SHA2_256),
+		PLUGIN_PROVIDE(PRIVKEY_SIGN, SIGN_RSA_EMSA_PKCS1_SHA2_384),
+		PLUGIN_PROVIDE(PRIVKEY_SIGN, SIGN_RSA_EMSA_PKCS1_SHA2_512),
+		PLUGIN_PROVIDE(PRIVKEY_SIGN, SIGN_RSA_EMSA_PKCS1_SHA1),
+		PLUGIN_PROVIDE(PRIVKEY_SIGN, SIGN_RSA_EMSA_PKCS1_MD5),
+		/* signature verification schemes */
+#if GCRYPT_VERSION_NUMBER >= 0x010700
+		PLUGIN_PROVIDE(PUBKEY_VERIFY, SIGN_RSA_EMSA_PSS),
+#endif
+		PLUGIN_PROVIDE(PUBKEY_VERIFY, SIGN_RSA_EMSA_PKCS1_NULL),
+		PLUGIN_PROVIDE(PUBKEY_VERIFY, SIGN_RSA_EMSA_PKCS1_SHA2_224),
+		PLUGIN_PROVIDE(PUBKEY_VERIFY, SIGN_RSA_EMSA_PKCS1_SHA2_256),
+		PLUGIN_PROVIDE(PUBKEY_VERIFY, SIGN_RSA_EMSA_PKCS1_SHA2_384),
+		PLUGIN_PROVIDE(PUBKEY_VERIFY, SIGN_RSA_EMSA_PKCS1_SHA2_512),
+		PLUGIN_PROVIDE(PUBKEY_VERIFY, SIGN_RSA_EMSA_PKCS1_SHA1),
+		PLUGIN_PROVIDE(PUBKEY_VERIFY, SIGN_RSA_EMSA_PKCS1_MD5),
 		/* random numbers */
 		PLUGIN_REGISTER(RNG, gcrypt_rng_create),
 			PLUGIN_PROVIDE(RNG, RNG_WEAK),
@@ -141,7 +165,9 @@ plugin_t *gcrypt_plugin_create()
 {
 	private_gcrypt_plugin_t *this;
 
+#if GCRYPT_VERSION_NUMBER < 0x010600
 	gcry_control(GCRYCTL_SET_THREAD_CBS, &gcry_threads_pthread);
+#endif
 
 	if (!gcry_check_version(GCRYPT_VERSION))
 	{

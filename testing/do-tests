@@ -49,6 +49,29 @@ passed_cnt="0"
 subdir_cnt="0"
 
 ##############################################################################
+# parse optional arguments
+#
+while getopts "vt" opt
+do
+	case "$opt" in
+	v)
+		verbose=YES
+		timestamps=YES
+		;;
+	t)
+		timestamps=YES
+		;;
+	esac
+done
+shift $((OPTIND-1))
+
+
+function print_time()
+{
+	[ "$timestamps" == "YES" ] && echo "$(date +%T.%N) ~ "
+}
+
+##############################################################################
 # copy default tests to $BUILDDIR
 #
 
@@ -207,12 +230,16 @@ for SUBDIR in $TESTS
 do
     SUBTESTS="`basename $SUBDIR`"
 
-    if [ $SUBTESTS = $SUBDIR ]
-    then
-	SUBTESTS="`ls $DEFAULTTESTSDIR/$SUBDIR`"
-    else
-	SUBDIR="`dirname $SUBDIR`"
-    fi
+	if [ $SUBTESTS = $SUBDIR ]
+	then
+		SUBTESTS="`ls $DEFAULTTESTSDIR/$SUBDIR`"
+	else
+		if [[ $SUBTESTS == *'*'* ]]
+		then
+			SUBTESTS="`basename -a $DEFAULTTESTSDIR/$SUBDIR`"
+		fi
+		SUBDIR="`dirname $SUBDIR`"
+	fi
 
     if [ ! -d $TODAYDIR/$SUBDIR ]
     then
@@ -298,63 +325,6 @@ do
 	touch $CONSOLE_LOG
 
 	TESTDIR=$TESTSDIR/${testname}
-	rm -rf $TESTDIR
-	mkdir -p $TESTDIR
-	cp -rfp $DEFAULTTESTSDIR/${testname}/* $TESTDIR
-
-
-	##############################################################################
-	# replace IP wildcards with actual IPv4 and IPv6 addresses
-	#
-
-	for host in $STRONGSWANHOSTS
-	do
-	    case $host in
-	    moon)
-		searchandreplace PH_IP_MOON1     $ipv4_moon1 $TESTDIR
-		searchandreplace PH_IP_MOON      $ipv4_moon  $TESTDIR
-		searchandreplace PH_IP6_MOON1    $ipv6_moon1 $TESTDIR
-		searchandreplace PH_IP6_MOON     $ipv6_moon  $TESTDIR
-		;;
-	    sun)
-		searchandreplace PH_IP_SUN1      $ipv4_sun1 $TESTDIR
-		searchandreplace PH_IP_SUN       $ipv4_sun  $TESTDIR
-		searchandreplace PH_IP6_SUN1     $ipv6_sun1 $TESTDIR
-		searchandreplace PH_IP6_SUN      $ipv6_sun  $TESTDIR
-		;;
-	    alice)
-		searchandreplace PH_IP_ALICE1    $ipv4_alice1 $TESTDIR
-		searchandreplace PH_IP_ALICE     $ipv4_alice  $TESTDIR
-		searchandreplace PH_IP6_ALICE1   $ipv6_alice1 $TESTDIR
-		searchandreplace PH_IP6_ALICE    $ipv6_alice  $TESTDIR
-		;;
-	    venus)
-		searchandreplace PH_IP_VENUS     $ipv4_venus $TESTDIR
-		searchandreplace PH_IP6_VENUS    $ipv6_venus $TESTDIR
-		;;
-	    bob)
-		searchandreplace PH_IP_BOB       $ipv4_bob $TESTDIR
-		searchandreplace PH_IPV6_BOB     $ipv6_bob $TESTDIR
-		;;
-	    carol)
-		searchandreplace PH_IP_CAROL1    $ipv4_carol1 $TESTDIR
-		searchandreplace PH_IP_CAROL     $ipv4_carol  $TESTDIR
-		searchandreplace PH_IP6_CAROL1   $ipv6_carol1 $TESTDIR
-		searchandreplace PH_IP6_CAROL    $ipv6_carol  $TESTDIR
-		;;
-	    dave)
-		searchandreplace PH_IP_DAVE1     $ipv4_dave1 $TESTDIR
-		searchandreplace PH_IP_DAVE      $ipv4_dave  $TESTDIR
-		searchandreplace PH_IP6_DAVE1    $ipv6_dave1 $TESTDIR
-		searchandreplace PH_IP6_DAVE     $ipv6_dave  $TESTDIR
-		;;
-	    winnetou)
-		searchandreplace PH_IP_WINNETOU  $ipv4_winnetou $TESTDIR
-		searchandreplace PH_IP6_WINNETOU $ipv6_winnetou $TESTDIR
-		;;
-	    esac
-	done
-
 
 	##########################################################################
 	# copy test specific configurations to hosts and clear log files
@@ -383,7 +353,7 @@ do
 		host=`echo $host_iface | awk -F ":" '{print $1}'`
 		iface=`echo $host_iface | awk -F ":" '{if ($2 != "") { print $2 } else { printf("eth0") }}'`
 		tcpdump_cmd="tcpdump -l $TCPDUMP_IM -i $iface not port ssh and not port domain >/tmp/tcpdump.log 2>/tmp/tcpdump.err.log &"
-		echo "${host}# $tcpdump_cmd" >> $CONSOLE_LOG
+		echo "$(print_time)${host}# $tcpdump_cmd" >> $CONSOLE_LOG
 		ssh $SSHCONF root@`eval echo \\\$ipv4_$host '$tcpdump_cmd'`
 		eval TDUP_${host}="true"
 	    done
@@ -438,7 +408,7 @@ do
 	eval `awk -F "::" '{
 	    if ($1 !~ /^#.*/ && $2 != "")
 	    {
-		printf("echo \"%s# %s\"; ", $1, $2)
+		printf("echo \"$(print_time)%s# %s\"; ", $1, $2)
 		printf("ssh \044SSHCONF root@\044ipv4_%s \"%s\"; ", $1, $2)
 		printf("echo;\n")
 	    }
@@ -452,7 +422,7 @@ do
 	function stop_tcpdump {
 	    # wait for packets to get processed, but don't wait longer than 1s
 	    eval ssh $SSHCONF root@\$ipv4_${1} "\"i=100; while [ \\\$i -gt 0 ]; do pkill -USR1 tcpdump; tail -1 /tmp/tcpdump.err.log | perl -n -e '/(\\d+).*?(\\d+)/; exit (\\\$1 == \\\$2)' || break; sleep 0.01; i=\\\$((\\\$i-1)); done;\""
-	    echo "${1}# killall tcpdump" >> $CONSOLE_LOG
+	    echo "$(print_time)${1}# killall tcpdump" >> $CONSOLE_LOG
 	    eval ssh $SSHCONF root@\$ipv4_${1} "\"killall tcpdump; while true; do killall -q -0 tcpdump || break; sleep 0.01; done;\""
 	    eval TDUP_${1}="false"
 	    echo "" >> $CONSOLE_LOG
@@ -469,29 +439,57 @@ do
 	STATUS="passed"
 
 	eval `awk -F "::" '{
-	    host=$1
-	    command=$2
-	    pattern=$3
-	    hit=$4
-	    if (host !~ /^#.*/ && command != "")
-	    {
+		host=$1
+		command=$2
+		pattern=$3
+		hit=$4
+		if (host ~ /^#.*/ || command == "")
+		{
+			next
+		}
+		printf("cmd_err=\044(tempfile -p test -s err); ")
+		printf("cmd_out=\044(tempfile -p test -s out); ")
 		if (command == "tcpdump")
 		{
-		    printf("if [ \044TDUP_%s == \"true\" ]; then stop_tcpdump %s; fi; \n", host, host)
-		    printf("echo \"%s# cat /tmp/tcpdump.log | grep \047%s\047  [%s]\"; ", host, pattern, hit)
-		    printf("ssh \044SSHCONF root@\044ipv4_%s cat /tmp/tcpdump.log | grep \"%s\"; ", host, pattern)
+			printf("if [ \044TDUP_%s == \"true\" ]; then stop_tcpdump %s; fi; \n", host, host)
+			printf("ssh \044SSHCONF root@\044ipv4_%s cat /tmp/tcpdump.log > \044cmd_out; ", host)
 		}
 		else
 		{
-		    printf("echo \"%s# %s | grep \047%s\047  [%s]\"; ", host, command, pattern, hit)
-		    printf("ssh \044SSHCONF root@\044ipv4_%s %s | grep \"%s\"; ",  host, command, pattern)
+			printf("ssh \044SSHCONF root@\044ipv4_%s %s >\044cmd_out 2>\044cmd_err; ",  host, command)
 		}
+		printf("cmd_res=\044(cat \044cmd_out | grep \"%s\"); ", pattern)
 		printf("cmd_exit=\044?; ")
+		printf("cmd_fail=0; ")
+		if (hit ~ /^[0-9]+$/)
+		{
+			printf("if [ \044(echo \"\044cmd_res\" | wc -l) -ne %d ] ", hit)
+		}
+		else
+		{
+			printf("if [ \044cmd_exit -eq 0 -a \"%s\" = \"NO\"  ] ", hit)
+			printf("|| [ \044cmd_exit -ne 0 -a \"%s\" = \"YES\" ] ", hit)
+		}
+		printf("; then STATUS=\"failed\"; cmd_fail=1; fi; \n")
+
+		printf("if [ \044cmd_fail -ne 0 ]; then echo \"~~~~~~~ FAIL ~~~~~~~\"; fi; \n")
+		if (command == "tcpdump")
+		{
+			printf("echo \"$(print_time)%s# cat /tmp/tcpdump.log | grep \047%s\047  [%s]\"; ", host, pattern, hit)
+		}
+		else
+		{
+			printf("echo \"$(print_time)%s# %s | grep \047%s\047  [%s]\"; ", host, command, pattern, hit)
+		}
+		printf("if [ -n \"\044cmd_res\" ]; then echo \"\044cmd_res\"; fi; \n")
+		printf("cat \044cmd_err; \n")
+		printf("if [ \044cmd_fail -ne 0 ]; then \n")
+		printf("if [ -s \044cmd_out ]; then echo \"~~ output ~~~~~~~~~~\"; \n")
+		printf("if [ \"\044verbose\" == \"YES\" ]; then cat \044cmd_out;\n")
+		printf("else cat \044cmd_out | head; fi; fi; \n")
+		printf("echo \"~~~~~~~~~~~~~~~~~~~~\"; fi; \n")
+		printf("rm -f -- \044cmd_out \044cmd_err; \n")
 		printf("echo; ")
-		printf("if [ \044cmd_exit -eq 0 -a \"%s\" = \"NO\"  ] ", hit)
-		printf("|| [ \044cmd_exit -ne 0 -a \"%s\" = \"YES\" ] ", hit)
-		printf("; then STATUS=\"failed\"; fi; \n")
-	    }
 	}' $TESTDIR/evaltest.dat` >> $CONSOLE_LOG 2>&1
 
 
@@ -695,20 +693,24 @@ do
 	do
 	    eval HOSTLOGIN=root@\$ipv4_${host}
 
-	    for file in clients.conf eap.conf radiusd.conf proxy.conf users
-	    do
-		scp $SSHCONF $HOSTLOGIN:/etc/freeradius/$file \
-		    $TESTRESULTDIR/${host}.$file  > /dev/null 2>&1
-	    done
+		RADIUS_DIR=/etc/freeradius/3.0
+		RADIUS_EAP_FILE=mods-enabled/eap
+		RADIUS_EAP_NAME=eap
+		if [ "$BASEIMGSUITE" == "jessie" ]
+		then
+			RADIUS_DIR=/etc/freeradius
+			RADIUS_EAP_FILE=eap.conf
+			RADIUS_EAP_NAME=eap.conf
+		fi
 
-		scp $SSHCONF $HOSTLOGIN:/etc/strongswan.conf \
-		    $TESTRESULTDIR/${host}.strongswan.conf  > /dev/null 2>&1
+		for file in clients.conf radiusd.conf proxy.conf users sites-enabled/default sites-enabled/inner-tunnel $RADIUS_EAP_FILE
+	    do
+		scp $SSHCONF $HOSTLOGIN:$RADIUS_DIR/$file \
+		    $TESTRESULTDIR/${host}.$(basename $file) > /dev/null 2>&1
+	    done
 
 	    scp $SSHCONF $HOSTLOGIN:/var/log/freeradius/radius.log \
 		$TESTRESULTDIR/${host}.radius.log  > /dev/null 2>&1
-
-	    ssh $SSHCONF $HOSTLOGIN grep imcv /var/log/daemon.log \
-		>> $TESTRESULTDIR/${host}.daemon.log 2>/dev/null
 
 	    chmod a+r $TESTRESULTDIR/*
 	    cat >> $TESTRESULTDIR/index.html <<@EOF
@@ -719,14 +721,14 @@ do
 	  <ul>
 	    <li><a href="$host.clients.conf">clients.conf</a></li>
 	    <li><a href="$host.radiusd.conf">radiusd.conf</a></li>
-	    <li><a href="$host.strongswan.conf">strongswan.conf</a></li>
+	    <li><a href="$host.$RADIUS_EAP_NAME">$RADIUS_EAP_NAME</a></li>
 	  </ul>
 	</td>
 	<td valign="top">
 	  <ul>
-	    <li><a href="$host.eap.conf">eap.conf</a></li>
+	    <li><a href="$host.default">sites-enabled/default</a></li>
+	    <li><a href="$host.inner-tunnel">sites-enabled/inner-tunnel</a></li>
 	    <li><a href="$host.radius.log">radius.log</a></li>
-	    <li><a href="$host.daemon.log">daemon.log</a></li>
 	  </ul>
       </td>
 	<td valign="top">
@@ -775,7 +777,7 @@ do
 	eval `awk -F "::" '{
 	    if ($1 !~ /^#.*/ && $2 != "")
 	    {
-		printf("echo \"%s# %s\"; ", $1, $2)
+		printf("echo \"$(print_time)%s# %s\"; ", $1, $2)
 		printf("ssh \044SSHCONF root@\044ipv4_%s \"%s\"; ", $1, $2)
 		printf("echo;\n")
 	    }
@@ -789,8 +791,10 @@ do
 	do
 		eval HOSTLOGIN=root@\$ipv4_${host}
 		IPSECSTATE=`ssh $SSHCONF $HOSTLOGIN 'ip xfrm state'`
+		# ignore IPv4/v6 states created with IPComp SAs
+		IPSECSTATEISSUE=`echo "$IPSECSTATE" | grep 'proto.*spi' | grep -v 'proto 4'`
 		IPSECPOLICY=`ssh $SSHCONF $HOSTLOGIN 'ip xfrm policy'`
-		if [ -n "$IPSECSTATE" -o -n "$IPSECPOLICY" ]
+		if [ -n "$IPSECSTATEISSUE" -o -n "$IPSECPOLICY" ]
 		then
 			echo -e "\n$host# ip xfrm state [NO]" >> $CONSOLE_LOG
 			echo "$IPSECSTATE" >> $CONSOLE_LOG
@@ -838,7 +842,7 @@ do
 	for host in $IPSECHOSTS
 	do
 	    eval HOSTLOGIN=root@\$ipv4_${host}
-	    ssh $SSHCONF $HOSTLOGIN "grep -s -E 'charon|last message repeated|imcv' \
+	    ssh $SSHCONF $HOSTLOGIN "grep -s -E 'systemd|swanctl|charon|last message repeated|imcv' \
 		/var/log/daemon.log" >> $TESTRESULTDIR/${host}.daemon.log
 	done
 

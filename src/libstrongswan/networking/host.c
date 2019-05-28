@@ -3,7 +3,7 @@
  * Copyright (C) 2006 Daniel Roethlisberger
  * Copyright (C) 2005-2006 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -139,7 +139,7 @@ int host_printf_hook(printf_hook_data_t *data, printf_hook_spec_t *spec,
 					snprintf(buffer, sizeof(buffer),
 							 "(address conversion failed)");
 				}
-				else if (spec->hash)
+				else if (spec->hash && port)
 				{
 					len = strlen(buffer);
 					snprintf(buffer + len, sizeof(buffer) - len,

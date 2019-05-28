@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Tobias Brunner
+ * Copyright (C) 2016-2017 Tobias Brunner
  * Copyright (C) 2015 Andreas Steffen
  * HSR Hochschule fuer Technik Rapperswil
  *
@@ -33,8 +33,6 @@
 #include <collections/hashtable.h>
 
 #include <vici_cert_info.h>
-
-#define HASH_SIZE_SHA1_HEX (2 * HASH_SIZE_SHA1)
 
 /**
  * Context used to track loaded secrets
@@ -108,9 +106,12 @@ static void load_certs(load_ctx_t *ctx, char *type_str, char *dir)
 	x509_flag_t flag;
 	struct stat st;
 	chunk_t *map;
-	char *path;
+	char *path, buf[PATH_MAX];
 
 	vici_cert_info_from_str(type_str, &type, &flag);
+
+	snprintf(buf, sizeof(buf), "%s%s%s", swanctl_dir, DIRECTORY_SEPARATOR, dir);
+	dir = buf;
 
 	enumerator = enumerator_create_directory(dir);
 	if (enumerator)
@@ -144,6 +145,7 @@ static bool load_key(load_ctx_t *ctx, char *dir, char *type, chunk_t data)
 	vici_req_t *req;
 	vici_res_t *res;
 	bool ret = TRUE;
+	char *id;
 
 	req = vici_begin("load-key");
 
@@ -178,6 +180,8 @@ static bool load_key(load_ctx_t *ctx, char *dir, char *type, chunk_t data)
 	else
 	{
 		printf("loaded %s key from '%s'\n", type, dir);
+		id = vici_find_str(res, "", "id");
+		free(ctx->keys->remove(ctx->keys, id));
 	}
 	vici_free_res(res);
 	return ret;
@@ -190,8 +194,7 @@ static bool load_key_anytype(load_ctx_t *ctx, char *path,
 							 private_key_t *private)
 {
 	bool loaded = FALSE;
-	chunk_t encoding, keyid;
-	char hex[HASH_SIZE_SHA1_HEX + 1];
+	chunk_t encoding;
 
 	if (!private->get_encoding(private, PRIVKEY_ASN1_DER, &encoding))
 	{
@@ -212,13 +215,6 @@ static bool load_key_anytype(load_ctx_t *ctx, char *path,
 		default:
 			fprintf(stderr, "unsupported key type in '%s'\n", path);
 			break;
-	}
-
-	if (loaded &&
-		private->get_fingerprint(private, KEYID_PUBKEY_SHA1, &keyid) &&
-		snprintf(hex, sizeof(hex), "%+B", &keyid) == HASH_SIZE_SHA1_HEX)
-	{
-		free(ctx->keys->remove(ctx->keys, hex));
 	}
 	chunk_clear(&encoding);
 	return loaded;
@@ -344,7 +340,7 @@ static void* decrypt_with_config(load_ctx_t *ctx, char *name, char *type,
 	credential_type_t credtype;
 	int subtype;
 	enumerator_t *enumerator, *secrets;
-	char *section, *key, *value, *file, buf[128];
+	char *section, *key, *value, *file;
 	shared_key_t *shared;
 	void *cred = NULL;
 	mem_cred_t *mem = NULL;
@@ -363,8 +359,8 @@ static void* decrypt_with_config(load_ctx_t *ctx, char *name, char *type,
 			file = ctx->cfg->get_str(ctx->cfg, "secrets.%s.file", NULL, section);
 			if (file && strcaseeq(file, name))
 			{
-				snprintf(buf, sizeof(buf), "secrets.%s", section);
-				secrets = ctx->cfg->create_key_value_enumerator(ctx->cfg, buf);
+				secrets = ctx->cfg->create_key_value_enumerator(ctx->cfg,
+														"secrets.%s", section);
 				while (secrets->enumerate(secrets, &key, &value))
 				{
 					if (strpfx(key, "secret"))
@@ -408,7 +404,7 @@ static void* decrypt_with_config(load_ctx_t *ctx, char *name, char *type,
 /**
  * Try to decrypt and load a private key
  */
-static bool load_encrypted_key(load_ctx_t *ctx,  char *rel, char *path,
+static bool load_encrypted_key(load_ctx_t *ctx, char *rel, char *path,
 							   char *type, chunk_t data)
 {
 	private_key_t *private;
@@ -435,7 +431,10 @@ static void load_keys(load_ctx_t *ctx, char *type, char *dir)
 	enumerator_t *enumerator;
 	struct stat st;
 	chunk_t *map;
-	char *path, *rel;
+	char *path, *rel, buf[PATH_MAX];
+
+	snprintf(buf, sizeof(buf), "%s%s%s", swanctl_dir, DIRECTORY_SEPARATOR, dir);
+	dir = buf;
 
 	enumerator = enumerator_create_directory(dir);
 	if (enumerator)
@@ -542,7 +541,10 @@ static void load_containers(load_ctx_t *ctx, char *type, char *dir)
 	enumerator_t *enumerator;
 	struct stat st;
 	chunk_t *map;
-	char *path, *rel;
+	char *path, *rel, buf[PATH_MAX];
+
+	snprintf(buf, sizeof(buf), "%s%s%s", swanctl_dir, DIRECTORY_SEPARATOR, dir);
+	dir = buf;
 
 	enumerator = enumerator_create_directory(dir);
 	if (enumerator)
@@ -664,7 +666,7 @@ static bool load_secret(load_ctx_t *ctx, char *section)
 	vici_req_t *req;
 	vici_res_t *res;
 	chunk_t data;
-	char *key, *value, buf[128], *type = NULL;
+	char *key, *value, *type = NULL;
 	bool ret = TRUE;
 	int i;
 	char *types[] = {
@@ -672,6 +674,7 @@ static bool load_secret(load_ctx_t *ctx, char *section)
 		"xauth",
 		"ntlm",
 		"ike",
+		"ppk",
 		"private",
 		"rsa",
 		"ecdsa",
@@ -695,7 +698,7 @@ static bool load_secret(load_ctx_t *ctx, char *section)
 		return FALSE;
 	}
 	if (!streq(type, "eap") && !streq(type, "xauth") && !streq(type, "ntlm") &&
-		!streq(type, "ike"))
+		!streq(type, "ike") && !streq(type, "ppk"))
 	{	/* skip non-shared secrets */
 		return TRUE;
 	}
@@ -727,8 +730,8 @@ static bool load_secret(load_ctx_t *ctx, char *section)
 	chunk_clear(&data);
 
 	vici_begin_list(req, "owners");
-	snprintf(buf, sizeof(buf), "secrets.%s", section);
-	enumerator = ctx->cfg->create_key_value_enumerator(ctx->cfg, buf);
+	enumerator = ctx->cfg->create_key_value_enumerator(ctx->cfg, "secrets.%s",
+													   section);
 	while (enumerator->enumerate(enumerator, &key, &value))
 	{
 		if (strpfx(key, "id"))
@@ -952,7 +955,7 @@ static int load_creds(vici_conn_t *conn)
 	bool clear = FALSE, noprompt = FALSE;
 	command_format_options_t format = COMMAND_FORMAT_NONE;
 	settings_t *cfg;
-	char *arg;
+	char *arg, *file = NULL;
 	int ret;
 
 	while (TRUE)
@@ -973,6 +976,9 @@ static int load_creds(vici_conn_t *conn)
 			case 'r':
 				format |= COMMAND_FORMAT_RAW;
 				continue;
+			case 'f':
+				file = arg;
+				continue;
 			case EOF:
 				break;
 			default:
@@ -981,10 +987,9 @@ static int load_creds(vici_conn_t *conn)
 		break;
 	}
 
-	cfg = settings_create(SWANCTL_CONF);
+	cfg = load_swanctl_conf(file);
 	if (!cfg)
 	{
-		fprintf(stderr, "parsing '%s' failed\n", SWANCTL_CONF);
 		return EINVAL;
 	}
 
@@ -1009,6 +1014,7 @@ static void __attribute__ ((constructor))reg()
 			{"noprompt",	'n', 0, "do not prompt for passwords"},
 			{"raw",			'r', 0, "dump raw response message"},
 			{"pretty",		'P', 0, "dump raw response message in pretty print"},
+			{"file",		'f', 1, "custom path to swanctl.conf"},
 		}
 	});
 }

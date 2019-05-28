@@ -43,7 +43,7 @@
  * thread pool.
  *
  * Connecting requires an uri, which is currently either a UNIX socket path
- * prefixed with unix://, or a hostname:port touple prefixed with tcp://.
+ * prefixed with unix://, or a hostname:port tuple prefixed with tcp://.
  * Passing NULL takes the system default socket path.
  *
  * After the connection has been established, request messages can be sent.
@@ -85,6 +85,10 @@
 #define LIBVICI_H_
 
 #include <stdio.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
  * Opaque vici connection contex.
@@ -464,5 +468,9 @@ void vici_init();
  * Deinitialize libvici after use.
  */
 void vici_deinit();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /** LIBVICI_H_ @}*/

@@ -1,8 +1,8 @@
 /*
- * Copyright (C) 2007-2015 Tobias Brunner
+ * Copyright (C) 2007-2018 Tobias Brunner
  * Copyright (C) 2005-2006 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -46,6 +46,17 @@ struct element_t {
 	 */
 	element_t *next;
 };
+
+/*
+ * Described in header
+ */
+bool linked_list_match_str(void *item, va_list args)
+{
+	char *a = item, *b;
+
+	VA_ARGS_VGET(args, b);
+	return streq(a, b);
+}
 
 /**
  * Creates an empty linked list object.
@@ -100,7 +111,7 @@ struct private_enumerator_t {
 	/**
 	 * implements enumerator interface
 	 */
-	enumerator_t enumerator;
+	enumerator_t public;
 
 	/**
 	 * associated linked list
@@ -111,31 +122,19 @@ struct private_enumerator_t {
 	 * current item
 	 */
 	element_t *current;
-
-	/**
-	 * enumerator has enumerated all items
-	 */
-	bool finished;
 };
 
-METHOD(enumerator_t, enumerate, bool,
-	private_enumerator_t *this, void **item)
+/**
+ * Enumerate the current item
+ */
+static bool do_enumerate(private_enumerator_t *this, va_list args)
 {
-	if (this->finished)
-	{
-		return FALSE;
-	}
+	void **item;
+
+	VA_ARGS_VGET(args, item);
+
 	if (!this->current)
 	{
-		this->current = this->list->first;
-	}
-	else
-	{
-		this->current = this->current->next;
-	}
-	if (!this->current)
-	{
-		this->finished = TRUE;
 		return FALSE;
 	}
 	if (item)
@@ -145,27 +144,46 @@ METHOD(enumerator_t, enumerate, bool,
 	return TRUE;
 }
 
+METHOD(enumerator_t, enumerate_next, bool,
+	private_enumerator_t *this, va_list args)
+{
+	if (this->current)
+	{
+		this->current = this->current->next;
+	}
+	return do_enumerate(this, args);
+}
+
+METHOD(enumerator_t, enumerate_current, bool,
+	private_enumerator_t *this, va_list args)
+{
+	this->public.venumerate = _enumerate_next;
+	return do_enumerate(this, args);
+}
+
 METHOD(linked_list_t, create_enumerator, enumerator_t*,
 	private_linked_list_t *this)
 {
 	private_enumerator_t *enumerator;
 
 	INIT(enumerator,
-		.enumerator = {
-			.enumerate = (void*)_enumerate,
+		.public = {
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _enumerate_current,
 			.destroy = (void*)free,
 		},
 		.list = this,
+		.current = this->first,
 	);
 
-	return &enumerator->enumerator;
+	return &enumerator->public;
 }
 
 METHOD(linked_list_t, reset_enumerator, void,
 	private_linked_list_t *this, private_enumerator_t *enumerator)
 {
-	enumerator->current = NULL;
-	enumerator->finished = FALSE;
+	enumerator->current = this->first;
+	enumerator->public.venumerate = _enumerate_current;
 }
 
 METHOD(linked_list_t, get_count, int,
@@ -282,14 +300,7 @@ METHOD(linked_list_t, insert_before, void,
 	current = enumerator->current;
 	if (!current)
 	{
-		if (enumerator->finished)
-		{
-			this->public.insert_last(&this->public, item);
-		}
-		else
-		{
-			this->public.insert_first(&this->public, item);
-		}
+		insert_last(this, item);
 		return;
 	}
 	element = element_create(item);
@@ -361,57 +372,75 @@ METHOD(linked_list_t, remove_at, void,
 	if (enumerator->current)
 	{
 		current = enumerator->current;
-		enumerator->current = current->previous;
+		enumerator->current = current->next;
+		/* the enumerator already points to the next item */
+		enumerator->public.venumerate = _enumerate_current;
 		remove_element(this, current);
 	}
 }
 
-METHOD(linked_list_t, find_first, status_t,
-	private_linked_list_t *this, linked_list_match_t match,
-	void **item, void *d1, void *d2, void *d3, void *d4, void *d5)
+METHOD(linked_list_t, find_first, bool,
+	private_linked_list_t *this, linked_list_match_t match, void **item, ...)
 {
 	element_t *current = this->first;
+	va_list args;
+	bool matched = FALSE;
+
+	if (!match && !item)
+	{
+		return FALSE;
+	}
 
 	while (current)
 	{
-		if ((match && match(current->value, d1, d2, d3, d4, d5)) ||
-			(!match && item && current->value == *item))
+		if (match)
+		{
+			va_start(args, item);
+			matched = match(current->value, args);
+			va_end(args);
+		}
+		else
+		{
+			matched = current->value == *item;
+		}
+		if (matched)
 		{
 			if (item != NULL)
 			{
 				*item = current->value;
 			}
-			return SUCCESS;
+			return TRUE;
 		}
 		current = current->next;
 	}
-	return NOT_FOUND;
+	return FALSE;
 }
 
 METHOD(linked_list_t, invoke_offset, void,
-	private_linked_list_t *this, size_t offset,
-	void *d1, void *d2, void *d3, void *d4, void *d5)
+	private_linked_list_t *this, size_t offset)
 {
 	element_t *current = this->first;
-	linked_list_invoke_t *method;
+	void (**method)(void*);
 
 	while (current)
 	{
 		method = current->value + offset;
-		(*method)(current->value, d1, d2, d3, d4, d5);
+		(*method)(current->value);
 		current = current->next;
 	}
 }
 
 METHOD(linked_list_t, invoke_function, void,
-	private_linked_list_t *this, linked_list_invoke_t fn,
-	void *d1, void *d2, void *d3, void *d4, void *d5)
+	private_linked_list_t *this, linked_list_invoke_t fn, ...)
 {
 	element_t *current = this->first;
+	va_list args;
 
 	while (current)
 	{
-		fn(current->value, d1, d2, d3, d4, d5);
+		va_start(args, fn);
+		fn(current->value, args);
+		va_end(args);
 		current = current->next;
 	}
 }
@@ -542,7 +571,7 @@ linked_list_t *linked_list_create()
 			.reset_enumerator = (void*)_reset_enumerator,
 			.get_first = _get_first,
 			.get_last = _get_last,
-			.find_first = (void*)_find_first,
+			.find_first = _find_first,
 			.insert_first = _insert_first,
 			.insert_last = _insert_last,
 			.insert_before = (void*)_insert_before,
@@ -550,8 +579,8 @@ linked_list_t *linked_list_create()
 			.remove_last = _remove_last,
 			.remove = _remove_,
 			.remove_at = (void*)_remove_at,
-			.invoke_offset = (void*)_invoke_offset,
-			.invoke_function = (void*)_invoke_function,
+			.invoke_offset = _invoke_offset,
+			.invoke_function = _invoke_function,
 			.clone_offset = _clone_offset,
 			.equals_offset = _equals_offset,
 			.equals_function = _equals_function,

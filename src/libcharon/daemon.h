@@ -3,7 +3,7 @@
  * Copyright (C) 2005-2009 Martin Willi
  * Copyright (C) 2006 Daniel Roethlisberger
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -169,7 +169,7 @@
  * IKE_SA.
  *
  * The controller, credential_manager, bus and backend_manager (config) are
- * places where a plugin ca register itself to privide information or observe
+ * places where a plugin ca register itself to provide information or observe
  * and control the daemon.
  */
 

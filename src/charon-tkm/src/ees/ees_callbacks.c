@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2012-2014 Reto Buerki
  * Copyright (C) 2012 Adrian-Ken Rueegsegger
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -47,4 +47,5 @@ void charon_esa_expire(result_type *res, const sp_id_type sp_id,
 	DBG1(DBG_KNL, "ees: expire received for reqid %u, spi %x, dst %H", sp_id,
 		 ntohl(spi_rem), dst);
 	charon->kernel->expire(charon->kernel, protocol, spi_rem, dst, hard != 0);
+	dst->destroy(dst);
 }

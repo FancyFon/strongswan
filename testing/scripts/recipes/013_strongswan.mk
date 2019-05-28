@@ -28,6 +28,7 @@ CONFIG_OPTS = \
 	--enable-eap-aka-3gpp2 \
 	--enable-eap-sim \
 	--enable-eap-sim-file \
+	--enable-eap-simaka-sql \
 	--enable-eap-md5 \
 	--enable-md4 \
 	--enable-eap-mschapv2 \
@@ -53,14 +54,15 @@ CONFIG_OPTS = \
 	--enable-imv-os \
 	--enable-imc-attestation \
 	--enable-imv-attestation \
-	--enable-imc-swid \
-	--enable-imv-swid \
+	--enable-imc-swima \
+	--enable-imv-swima \
 	--enable-imc-hcd \
 	--enable-imv-hcd \
 	--enable-sql \
 	--enable-sqlite \
 	--enable-attr-sql \
 	--enable-mediation \
+	--enable-botan \
 	--enable-openssl \
 	--enable-blowfish \
 	--enable-kernel-pfkey \
@@ -100,7 +102,10 @@ CONFIG_OPTS = \
 	--enable-lookip \
 	--enable-bliss \
 	--enable-sha3 \
-	--enable-newhope
+	--enable-newhope \
+	--enable-systemd \
+	--enable-counters \
+	--enable-save-keys
 
 export ADA_PROJECT_PATH=/usr/local/ada/lib/gnat
 

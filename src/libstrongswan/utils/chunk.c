@@ -2,7 +2,7 @@
  * Copyright (C) 2008-2013 Tobias Brunner
  * Copyright (C) 2005-2006 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -478,7 +478,7 @@ chunk_t chunk_to_hex(chunk_t chunk, char *buf, bool uppercase)
 }
 
 /**
- * convert a signle hex character to its binary value
+ * convert a single hex character to its binary value
  */
 static char hex2bin(char hex)
 {
@@ -504,7 +504,13 @@ chunk_t chunk_from_hex(chunk_t hex, char *buf)
 	u_char *ptr;
 	bool odd = FALSE;
 
-   /* subtract the number of optional ':' separation characters */
+	/* skip an optional 0x prefix */
+	if (hex.len > 1 && hex.ptr[1] == 'x' && hex.ptr[0] == '0')
+	{
+		hex = chunk_skip(hex, 2);
+	}
+
+	/* subtract the number of optional ':' separation characters */
 	len = hex.len;
 	ptr = hex.ptr;
 	for (i = 0; i < hex.len; i++)
@@ -637,7 +643,7 @@ chunk_t chunk_from_base64(chunk_t base64, char *buf)
 		outlen += 3;
 		for (j = 0; j < 4; j++)
 		{
-			if (*pos == '=')
+			if (*pos == '=' && outlen > 0)
 			{
 				outlen--;
 			}
@@ -853,7 +859,7 @@ static inline uint64_t siplast(size_t len, u_char *pos)
 }
 
 /**
- * Caculate SipHash-2-4 with an optional first block given as argument.
+ * Calculate SipHash-2-4 with an optional first block given as argument.
  */
 static uint64_t chunk_mac_inc(chunk_t chunk, u_char *key, uint64_t m)
 {

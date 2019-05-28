@@ -15,6 +15,8 @@ endif
 
 libstrongswan_tpm_la_SOURCES = \
 	tpm_plugin.h tpm_plugin.c \
-	tpm_private_key.h tpm_private_key.c
+	tpm_cert.h tpm_cert.c \
+	tpm_private_key.h tpm_private_key.c \
+	tpm_rng.h tpm_rng.c
 
 libstrongswan_tpm_la_LDFLAGS = -module -avoid-version

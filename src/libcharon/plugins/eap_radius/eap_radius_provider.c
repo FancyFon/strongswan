@@ -1,4 +1,7 @@
 /*
+ * Copyright (C) 2018 Tobias Brunner
+ * HSR Hochschule fuer Technik Rapperswil
+ *
  * Copyright (C) 2013 Martin Willi
  * Copyright (C) 2013 revosec AG
  *
@@ -92,7 +95,7 @@ static void destroy_attr(attr_t *this)
  * Hashtable entry with leases and attributes
  */
 typedef struct {
-	/** IKE_SA uniqe id we assign the IP lease */
+	/** IKE_SA unique id we assign the IP lease */
 	uintptr_t id;
 	/** list of IP leases received from AAA, as host_t */
 	linked_list_t *addrs;
@@ -131,7 +134,7 @@ static entry_t* get_or_create_entry(hashtable_t *hashtable, uintptr_t id)
 }
 
 /**
- * Put an entry to hashtable, or destroy it ife empty
+ * Put an entry to hashtable, or destroy it if empty
  */
 static void put_or_destroy_entry(hashtable_t *hashtable, entry_t *entry)
 {
@@ -404,11 +407,13 @@ typedef struct {
 	attr_t *current;
 } attribute_enumerator_t;
 
-
 METHOD(enumerator_t, attribute_enumerate, bool,
-	attribute_enumerator_t *this, configuration_attribute_type_t *type,
-	chunk_t *data)
+	attribute_enumerator_t *this, va_list args)
 {
+	configuration_attribute_type_t *type;
+	chunk_t *data;
+
+	VA_ARGS_VGET(args, type, data);
 	if (this->current)
 	{
 		destroy_attr(this->current);
@@ -446,7 +451,8 @@ METHOD(attribute_provider_t, create_attribute_enumerator, enumerator_t*,
 
 	INIT(enumerator,
 		.public = {
-			.enumerate = (void*)_attribute_enumerate,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _attribute_enumerate,
 			.destroy = _attribute_destroy,
 		},
 		.list = linked_list_create(),
@@ -491,6 +497,24 @@ METHOD(eap_radius_provider_t, add_attribute, void,
 	this->listener.mutex->unlock(this->listener.mutex);
 }
 
+METHOD(eap_radius_provider_t, clear_unclaimed, enumerator_t*,
+	private_eap_radius_provider_t *this, uint32_t id)
+{
+	entry_t *entry;
+
+	this->listener.mutex->lock(this->listener.mutex);
+	entry = this->listener.unclaimed->remove(this->listener.unclaimed,
+											 (void*)(uintptr_t)id);
+	this->listener.mutex->unlock(this->listener.mutex);
+	if (!entry)
+	{
+		return enumerator_create_empty();
+	}
+	return enumerator_create_cleaner(
+					entry->addrs->create_enumerator(entry->addrs),
+					(void*)destroy_entry, entry);
+}
+
 METHOD(eap_radius_provider_t, destroy, void,
 	private_eap_radius_provider_t *this)
 {
@@ -520,6 +544,7 @@ eap_radius_provider_t *eap_radius_provider_create()
 				},
 				.add_framed_ip = _add_framed_ip,
 				.add_attribute = _add_attribute,
+				.clear_unclaimed = _clear_unclaimed,
 				.destroy = _destroy,
 			},
 			.listener = {
@@ -535,6 +560,14 @@ eap_radius_provider_t *eap_radius_provider_create()
 				.mutex = mutex_create(MUTEX_TYPE_DEFAULT),
 			},
 		);
+
+		if (lib->settings->get_bool(lib->settings,
+							"%s.plugins.eap-radius.accounting", FALSE, lib->ns))
+		{
+			/* if RADIUS accounting is enabled, keep unclaimed IPs around until
+			 * the Accounting-Stop message is sent */
+			this->listener.public.message = NULL;
+		}
 
 		charon->bus->add_listener(charon->bus, &this->listener.public);
 

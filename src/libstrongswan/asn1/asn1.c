@@ -2,7 +2,7 @@
  * Copyright (C) 2006 Martin Will
  * Copyright (C) 2000-2016 Andreas Steffen
  *
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -33,7 +33,15 @@ const chunk_t ASN1_INTEGER_1 = chunk_from_chars(0x02, 0x01, 0x01);
 const chunk_t ASN1_INTEGER_2 = chunk_from_chars(0x02, 0x01, 0x02);
 
 /*
- * Defined in header.
+ * Described in header
+ */
+chunk_t asn1_algorithmIdentifier_params(int oid, chunk_t params)
+{
+	return asn1_wrap(ASN1_SEQUENCE, "mm", asn1_build_known_oid(oid), params);
+}
+
+/*
+ * Described in header
  */
 chunk_t asn1_algorithmIdentifier(int oid)
 {
@@ -55,7 +63,7 @@ chunk_t asn1_algorithmIdentifier(int oid)
 			parameters = asn1_simple_object(ASN1_NULL, chunk_empty);
 			break;
 	}
-	return asn1_wrap(ASN1_SEQUENCE, "mm", asn1_build_known_oid(oid), parameters);
+	return asn1_algorithmIdentifier_params(oid, parameters);
 }
 
 /*
@@ -350,13 +358,15 @@ time_t asn1_to_time(const chunk_t *utctime, asn1_t type)
 	int tm_leap_4, tm_leap_100, tm_leap_400, tm_leap;
 	int tz_hour, tz_min, tz_offset;
 	time_t tm_days, tm_secs;
-	u_char *eot = NULL;
+	char buf[BUF_LEN], *eot = NULL;
 
-	if ((eot = memchr(utctime->ptr, 'Z', utctime->len)) != NULL)
+	snprintf(buf, sizeof(buf), "%.*s", (int)utctime->len, utctime->ptr);
+
+	if ((eot = strchr(buf, 'Z')) != NULL)
 	{
 		tz_offset = 0; /* Zulu time with a zero time zone offset */
 	}
-	else if ((eot = memchr(utctime->ptr, '+', utctime->len)) != NULL)
+	else if ((eot = strchr(buf, '+')) != NULL)
 	{
 		if (sscanf(eot+1, "%2d%2d", &tz_hour, &tz_min) != 2)
 		{
@@ -364,7 +374,7 @@ time_t asn1_to_time(const chunk_t *utctime, asn1_t type)
 		}
 		tz_offset = 3600*tz_hour + 60*tz_min;  /* positive time zone offset */
 	}
-	else if ((eot = memchr(utctime->ptr, '-', utctime->len)) != NULL)
+	else if ((eot = strchr(buf, '-')) != NULL)
 	{
 		if (sscanf(eot+1, "%2d%2d", &tz_hour, &tz_min) != 2)
 		{
@@ -382,15 +392,15 @@ time_t asn1_to_time(const chunk_t *utctime, asn1_t type)
 		const char* format = (type == ASN1_UTCTIME)? "%2d%2d%2d%2d%2d":
 													 "%4d%2d%2d%2d%2d";
 
-		if (sscanf(utctime->ptr, format, &tm_year, &tm_mon, &tm_day,
-										 &tm_hour, &tm_min) != 5)
+		if (sscanf(buf, format, &tm_year, &tm_mon, &tm_day,
+								&tm_hour, &tm_min) != 5)
 		{
 			return 0; /* error in [yy]yymmddhhmm time format */
 		}
 	}
 
 	/* is there a seconds field? */
-	if ((eot - utctime->ptr) == ((type == ASN1_UTCTIME)?12:14))
+	if ((eot - buf) == ((type == ASN1_UTCTIME)?12:14))
 	{
 		if (sscanf(eot-2, "%2d", &tm_sec) != 1)
 		{
@@ -607,6 +617,26 @@ uint64_t asn1_parse_integer_uint64(chunk_t blob)
 	return val;
 }
 
+/*
+ * Described in header
+ */
+chunk_t asn1_integer_from_uint64(uint64_t val)
+{
+	u_char buf[sizeof(val)];
+	chunk_t enc = chunk_empty;
+
+	if (val < 0x100)
+	{
+		buf[0] = (u_char)val;
+		return chunk_clone(chunk_create(buf, 1));
+	}
+	for (enc.ptr = buf + sizeof(val); val; enc.len++, val >>= 8)
+	{	/* fill the buffer from the end */
+		*(--enc.ptr) = val & 0xff;
+	}
+	return chunk_clone(enc);
+}
+
 /**
  * ASN.1 definition of an algorithmIdentifier
  */
@@ -795,7 +825,6 @@ chunk_t asn1_simple_object(asn1_t tag, chunk_t content)
 
 	u_char *pos = asn1_build_object(&object, tag, content.len);
 	memcpy(pos, content.ptr, content.len);
-	pos += content.len;
 
 	return object;
 }

@@ -55,7 +55,6 @@
 #include <bus/listeners/sys_logger.h>
 #include <bus/listeners/file_logger.h>
 #include <collections/array.h>
-#include <config/proposal.h>
 #include <plugins/plugin_feature.h>
 #include <kernel/kernel_handler.h>
 #include <processing/jobs/start_action_job.h>
@@ -116,6 +115,13 @@ struct private_daemon_t {
 	 */
 	refcount_t ref;
 };
+
+/**
+ * Register plugins if built statically
+ */
+#ifdef STATIC_PLUGIN_CONSTRUCTORS
+#include "plugin_constructors.c"
+#endif
 
 /**
  * One and only instance of the daemon.
@@ -275,13 +281,14 @@ static void logger_entry_unregister_destroy(logger_entry_t *this)
 	logger_entry_destroy(this);
 }
 
-/**
- * Match a logger entry by target and whether it is a file or syslog logger
- */
-static bool logger_entry_match(logger_entry_t *this, char *target,
-							   logger_type_t *type)
+CALLBACK(logger_entry_match, bool,
+	logger_entry_t *this, va_list args)
 {
-	return this->type == *type && streq(this->target, target);
+	logger_type_t type;
+	char *target;
+
+	VA_ARGS_VGET(args, target, type);
+	return this->type == type && streq(this->target, target);
 }
 
 /**
@@ -343,8 +350,8 @@ static logger_entry_t *get_logger_entry(char *target, logger_type_t type,
 {
 	logger_entry_t *entry;
 
-	if (existing->find_first(existing, (void*)logger_entry_match,
-							(void**)&entry, target, &type) != SUCCESS)
+	if (!existing->find_first(existing, logger_entry_match, (void**)&entry,
+							  target, type))
 	{
 		INIT(entry,
 			.target = strdup(target),
@@ -473,25 +480,27 @@ static void load_sys_logger(private_daemon_t *this, char *facility,
 /**
  * Load the given file logger configured in strongswan.conf
  */
-static void load_file_logger(private_daemon_t *this, char *filename,
+static void load_file_logger(private_daemon_t *this, char *section,
 							 linked_list_t *current_loggers)
 {
 	file_logger_t *file_logger;
 	debug_t group;
 	level_t def;
 	bool add_ms, ike_name, flush_line, append;
-	char *time_format;
+	char *time_format, *filename;
 
 	time_format = lib->settings->get_str(lib->settings,
-						"%s.filelog.%s.time_format", NULL, lib->ns, filename);
+						"%s.filelog.%s.time_format", NULL, lib->ns, section);
 	add_ms = lib->settings->get_bool(lib->settings,
-						"%s.filelog.%s.time_add_ms", FALSE, lib->ns, filename);
+						"%s.filelog.%s.time_add_ms", FALSE, lib->ns, section);
 	ike_name = lib->settings->get_bool(lib->settings,
-						"%s.filelog.%s.ike_name", FALSE, lib->ns, filename);
+						"%s.filelog.%s.ike_name", FALSE, lib->ns, section);
 	flush_line = lib->settings->get_bool(lib->settings,
-						"%s.filelog.%s.flush_line", FALSE, lib->ns, filename);
+						"%s.filelog.%s.flush_line", FALSE, lib->ns, section);
 	append = lib->settings->get_bool(lib->settings,
-						"%s.filelog.%s.append", TRUE, lib->ns, filename);
+						"%s.filelog.%s.append", TRUE, lib->ns, section);
+	filename = lib->settings->get_str(lib->settings,
+						"%s.filelog.%s.path", section, lib->ns, section);
 
 	file_logger = add_file_logger(this, filename, current_loggers);
 	if (!file_logger)
@@ -503,12 +512,12 @@ static void load_file_logger(private_daemon_t *this, char *filename,
 	file_logger->open(file_logger, flush_line, append);
 
 	def = lib->settings->get_int(lib->settings, "%s.filelog.%s.default", 1,
-								 lib->ns, filename);
+								 lib->ns, section);
 	for (group = 0; group < DBG_MAX; group++)
 	{
 		file_logger->set_level(file_logger, group,
 				lib->settings->get_int(lib->settings, "%s.filelog.%s.%N", def,
-							lib->ns, filename, debug_lower_names, group));
+							lib->ns, section, debug_lower_names, group));
 	}
 	charon->bus->add_logger(charon->bus, &file_logger->logger);
 }
@@ -537,6 +546,10 @@ static void load_custom_logger(private_daemon_t *this,
 		custom_logger->set_level(custom_logger, group,
 				lib->settings->get_int(lib->settings, "%s.customlog.%s.%N", def,
 							lib->ns, entry->name, debug_lower_names, group));
+	}
+	if (custom_logger->reload)
+	{
+		custom_logger->reload(custom_logger);
 	}
 	charon->bus->add_logger(charon->bus, &custom_logger->logger);
 }
@@ -980,11 +993,6 @@ bool libcharon_init()
 	/* set up hook to log dbg message in library via charons message bus */
 	dbg_old = dbg;
 	dbg = dbg_bus;
-
-	lib->printf_hook->add_handler(lib->printf_hook, 'P',
-								  proposal_printf_hook,
-								  PRINTF_HOOK_ARGTYPE_POINTER,
-								  PRINTF_HOOK_ARGTYPE_END);
 
 	if (lib->integrity &&
 		!lib->integrity->check(lib->integrity, "libcharon", libcharon_init))

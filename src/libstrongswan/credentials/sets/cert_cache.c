@@ -48,9 +48,9 @@ struct relation_t {
 	certificate_t *issuer;
 
 	/**
-	 * Signature scheme used to sign this relation
+	 * Signature scheme and parameters used to sign this relation
 	 */
-	signature_scheme_t scheme;
+	signature_params_t *scheme;
 
 	/**
 	 * Cache hits
@@ -84,7 +84,7 @@ struct private_cert_cache_t {
  */
 static void cache(private_cert_cache_t *this,
 				  certificate_t *subject, certificate_t *issuer,
-				  signature_scheme_t scheme)
+				  signature_params_t *scheme)
 {
 	relation_t *rel;
 	int i, offset, try;
@@ -118,7 +118,8 @@ static void cache(private_cert_cache_t *this,
 					{
 						rel->subject->destroy(rel->subject);
 						rel->subject = subject->get_ref(subject);
-						rel->scheme = scheme;
+						signature_params_destroy(rel->scheme);
+						rel->scheme = signature_params_clone(scheme);
 						return rel->lock->unlock(rel->lock);
 					}
 				}
@@ -139,7 +140,7 @@ static void cache(private_cert_cache_t *this,
 			{
 				rel->subject = subject->get_ref(subject);
 				rel->issuer = issuer->get_ref(issuer);
-				rel->scheme = scheme;
+				rel->scheme = signature_params_clone(scheme);
 				return rel->lock->unlock(rel->lock);
 			}
 			rel->lock->unlock(rel->lock);
@@ -165,10 +166,11 @@ static void cache(private_cert_cache_t *this,
 				{
 					rel->subject->destroy(rel->subject);
 					rel->issuer->destroy(rel->issuer);
+					signature_params_destroy(rel->scheme);
 				}
 				rel->subject = subject->get_ref(subject);
 				rel->issuer = issuer->get_ref(issuer);
-				rel->scheme = scheme;
+				rel->scheme = signature_params_clone(scheme);
 				rel->hits = 0;
 				return rel->lock->unlock(rel->lock);
 			}
@@ -180,11 +182,11 @@ static void cache(private_cert_cache_t *this,
 
 METHOD(cert_cache_t, issued_by, bool,
 	private_cert_cache_t *this, certificate_t *subject, certificate_t *issuer,
-	signature_scheme_t *schemep)
+	signature_params_t **schemep)
 {
 	certificate_t *cached_issuer = NULL;
 	relation_t *found = NULL, *current;
-	signature_scheme_t scheme;
+	signature_params_t *scheme;
 	int i;
 
 	for (i = 0; i < CACHE_SIZE; i++)
@@ -202,7 +204,7 @@ METHOD(cert_cache_t, issued_by, bool,
 					found = current;
 					if (schemep)
 					{
-						*schemep = current->scheme;
+						*schemep = signature_params_clone(current->scheme);
 					}
 				}
 				else if (!cached_issuer)
@@ -225,6 +227,10 @@ METHOD(cert_cache_t, issued_by, bool,
 		{
 			*schemep = scheme;
 		}
+		else
+		{
+			signature_params_destroy(scheme);
+		}
 		DESTROY_IF(cached_issuer);
 		return TRUE;
 	}
@@ -233,7 +239,7 @@ METHOD(cert_cache_t, issued_by, bool,
 }
 
 /**
- * certificate enumerator implemenation
+ * certificate enumerator implementation
  */
 typedef struct {
 	/** implements enumerator_t interface */
@@ -252,13 +258,14 @@ typedef struct {
 	int locked;
 } cert_enumerator_t;
 
-/**
- * filter function for certs enumerator
- */
-static bool cert_enumerate(cert_enumerator_t *this, certificate_t **out)
+METHOD(enumerator_t, cert_enumerate, bool,
+	cert_enumerator_t *this, va_list args)
 {
 	public_key_t *public;
 	relation_t *rel;
+	certificate_t **out;
+
+	VA_ARGS_VGET(args, out);
 
 	if (this->locked >= 0)
 	{
@@ -311,10 +318,8 @@ static bool cert_enumerate(cert_enumerator_t *this, certificate_t **out)
 	return FALSE;
 }
 
-/**
- * clean up enumeration data
- */
-static void cert_enumerator_destroy(cert_enumerator_t *this)
+METHOD(enumerator_t, cert_enumerator_destroy, void,
+	cert_enumerator_t *this)
 {
 	relation_t *rel;
 
@@ -336,16 +341,19 @@ METHOD(credential_set_t, create_enumerator, enumerator_t*,
 	{
 		return NULL;
 	}
-	enumerator = malloc_thing(cert_enumerator_t);
-	enumerator->public.enumerate = (void*)cert_enumerate;
-	enumerator->public.destroy = (void*)cert_enumerator_destroy;
-	enumerator->cert = cert;
-	enumerator->key = key;
-	enumerator->id = id;
-	enumerator->relations = this->relations;
-	enumerator->index = -1;
-	enumerator->locked = -1;
-
+	INIT(enumerator,
+		.public = {
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _cert_enumerate,
+			.destroy = _cert_enumerator_destroy,
+		},
+		.cert = cert,
+		.key = key,
+		.id = id,
+		.relations = this->relations,
+		.index = -1,
+		.locked = -1,
+	);
 	return &enumerator->public;
 }
 
@@ -381,8 +389,10 @@ METHOD(cert_cache_t, flush, void,
 			{
 				rel->subject->destroy(rel->subject);
 				rel->issuer->destroy(rel->issuer);
+				signature_params_destroy(rel->scheme);
 				rel->subject = NULL;
 				rel->issuer = NULL;
+				rel->scheme = NULL;
 				rel->hits = 0;
 			}
 		}
@@ -403,6 +413,7 @@ METHOD(cert_cache_t, destroy, void,
 		{
 			rel->subject->destroy(rel->subject);
 			rel->issuer->destroy(rel->issuer);
+			signature_params_destroy(rel->scheme);
 		}
 		rel->lock->destroy(rel->lock);
 	}
@@ -436,6 +447,7 @@ cert_cache_t *cert_cache_create()
 	{
 		this->relations[i].subject = NULL;
 		this->relations[i].issuer = NULL;
+		this->relations[i].scheme = NULL;
 		this->relations[i].hits = 0;
 		this->relations[i].lock = rwlock_create(RWLOCK_TYPE_DEFAULT);
 	}

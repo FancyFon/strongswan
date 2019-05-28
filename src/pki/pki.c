@@ -1,7 +1,7 @@
 /*
- * Copyright (C) 2012-2014 Tobias Brunner
+ * Copyright (C) 2012-2018 Tobias Brunner
  * Copyright (C) 2009 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -237,25 +237,107 @@ void set_file_mode(FILE *stream, cred_encoding_type_t enc)
 #endif
 }
 
-/*
- * Described in header
+/**
+ * Determine a default hash algorithm for the given key
  */
-hash_algorithm_t get_default_digest(private_key_t *private)
+static hash_algorithm_t get_default_digest(private_key_t *private)
 {
 	enumerator_t *enumerator;
-	signature_scheme_t scheme;
+	signature_params_t *params;
 	hash_algorithm_t alg = HASH_UNKNOWN;
 
 	enumerator = signature_schemes_for_key(private->get_type(private),
 										   private->get_keysize(private));
-	if (enumerator->enumerate(enumerator, &scheme))
+	if (enumerator->enumerate(enumerator, &params))
 	{
-		alg = hasher_from_signature_scheme(scheme);
+		alg = hasher_from_signature_scheme(params->scheme, params->params);
 	}
 	enumerator->destroy(enumerator);
 
 	/* default to SHA-256 */
 	return alg == HASH_UNKNOWN ? HASH_SHA256 : alg;
+}
+
+/*
+ * Described in header
+ */
+signature_params_t *get_signature_scheme(private_key_t *private,
+										 hash_algorithm_t digest, bool pss)
+{
+	signature_params_t *scheme, *selected = NULL;
+	enumerator_t *enumerator;
+
+	if (private->supported_signature_schemes)
+	{
+		enumerator = private->supported_signature_schemes(private);
+		while (enumerator->enumerate(enumerator, &scheme))
+		{
+			if (private->get_type(private) == KEY_RSA &&
+				pss != (scheme->scheme == SIGN_RSA_EMSA_PSS))
+			{
+				continue;
+			}
+			if (digest == HASH_UNKNOWN ||
+				digest == hasher_from_signature_scheme(scheme->scheme,
+													   scheme->params))
+			{
+				selected = signature_params_clone(scheme);
+				break;
+			}
+		}
+		enumerator->destroy(enumerator);
+		return selected;
+	}
+
+	if (digest == HASH_UNKNOWN)
+	{
+		digest = get_default_digest(private);
+	}
+	if (private->get_type(private) == KEY_RSA && pss)
+	{
+		rsa_pss_params_t pss_params = {
+			.hash = digest,
+			.mgf1_hash = digest,
+			.salt_len = RSA_PSS_SALT_LEN_DEFAULT,
+		};
+		signature_params_t pss_scheme = {
+			.scheme = SIGN_RSA_EMSA_PSS,
+			.params = &pss_params,
+		};
+		rsa_pss_params_set_salt_len(&pss_params, 0);
+		scheme = signature_params_clone(&pss_scheme);
+	}
+	else
+	{
+		INIT(scheme,
+			.scheme = signature_scheme_from_oid(
+								hasher_signature_algorithm_to_oid(digest,
+												private->get_type(private))),
+		);
+	}
+	return scheme;
+}
+
+/*
+ * Described in header
+ */
+traffic_selector_t* parse_ts(char *str)
+{
+	ts_type_t type = TS_IPV4_ADDR_RANGE;
+	char *to, from[64];
+
+	if (strchr(str, ':'))
+	{
+		type = TS_IPV6_ADDR_RANGE;
+	}
+	to = strchr(str, '-');
+	if (to)
+	{
+		snprintf(from, sizeof(from), "%.*s", (int)(to - str), str);
+		to++;
+		return traffic_selector_create_from_string(0, type, from, 0, to, 65535);
+	}
+	return traffic_selector_create_from_cidr(str, 0, 0, 65535);
 }
 
 /**

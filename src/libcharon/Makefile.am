@@ -14,7 +14,6 @@ config/backend_manager.c config/backend_manager.h config/backend.h \
 config/child_cfg.c config/child_cfg.h \
 config/ike_cfg.c config/ike_cfg.h \
 config/peer_cfg.c config/peer_cfg.h \
-config/proposal.c config/proposal.h \
 control/controller.c control/controller.h \
 daemon.c daemon.h \
 encoding/generator.c encoding/generator.h \
@@ -184,6 +183,15 @@ if USE_ME
     sa/ikev2/tasks/ike_me.c sa/ikev2/tasks/ike_me.h
 endif
 
+if STATIC_PLUGIN_CONSTRUCTORS
+BUILT_SOURCES = $(srcdir)/plugin_constructors.c
+CLEANFILES = $(srcdir)/plugin_constructors.c
+
+$(srcdir)/plugin_constructors.c: $(top_srcdir)/src/libstrongswan/plugins/plugin_constructors.py
+		$(AM_V_GEN) \
+		$(PYTHON) $(top_srcdir)/src/libstrongswan/plugins/plugin_constructors.py ${c_plugins} > $@
+endif
+
 # build optional plugins
 ########################
 
@@ -197,6 +205,13 @@ if USE_LOAD_TESTER
   SUBDIRS += plugins/load_tester
 if MONOLITHIC
   libcharon_la_LIBADD += plugins/load_tester/libstrongswan-load-tester.la
+endif
+endif
+
+if USE_SAVE_KEYS
+ SUBDIRS += plugins/save_keys
+if MONOLITHIC
+ libcharon_la_LIBADD += plugins/save_keys/libstrongswan-save-keys.la
 endif
 endif
 
@@ -246,6 +261,13 @@ if USE_FARP
   SUBDIRS += plugins/farp
 if MONOLITHIC
   libcharon_la_LIBADD += plugins/farp/libstrongswan-farp.la
+endif
+endif
+
+if USE_COUNTERS
+  SUBDIRS += plugins/counters
+if MONOLITHIC
+  libcharon_la_LIBADD += plugins/counters/libstrongswan-counters.la
 endif
 endif
 
@@ -358,6 +380,13 @@ if USE_EAP_AKA
   SUBDIRS += plugins/eap_aka
 if MONOLITHIC
   libcharon_la_LIBADD += plugins/eap_aka/libstrongswan-eap-aka.la
+endif
+endif
+
+if USE_EAP_AKA_3GPP
+  SUBDIRS += plugins/eap_aka_3gpp
+if MONOLITHIC
+  libcharon_la_LIBADD += plugins/eap_aka_3gpp/libstrongswan-eap-aka-3gpp.la
 endif
 endif
 
@@ -707,4 +736,12 @@ endif
 if MONOLITHIC
   SUBDIRS += .
 endif
+
+# build unit tests
+##################
+
 SUBDIRS += tests
+
+if USE_EAP_AKA_3GPP
+  SUBDIRS += plugins/eap_aka_3gpp/tests
+endif

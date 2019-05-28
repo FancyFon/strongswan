@@ -2,7 +2,7 @@
  * Copyright (C) 2008-2013 Tobias Brunner
  * Copyright (C) 2005-2008 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -332,7 +332,7 @@ static inline bool chunk_equals_ptr(chunk_t *a, chunk_t *b)
 }
 
 /**
- * Increment a chunk, as it would reprensent a network order integer.
+ * Increment a chunk, as it would represent a network order integer.
  *
  * @param chunk			chunk to increment
  * @return				TRUE if an overflow occurred

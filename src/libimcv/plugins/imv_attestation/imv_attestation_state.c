@@ -250,10 +250,14 @@ METHOD(imv_state_t, get_contracts, seg_contract_manager_t*,
 	return this->contracts;
 }
 
-METHOD(imv_state_t, change_state, void,
+METHOD(imv_state_t, change_state, TNC_ConnectionState,
 	private_imv_attestation_state_t *this, TNC_ConnectionState new_state)
 {
+	TNC_ConnectionState old_state;
+
+	old_state = this->state;
 	this->state = new_state;
+	return old_state;
 }
 
 METHOD(imv_state_t, get_recommendation, void,
@@ -338,6 +342,24 @@ METHOD(imv_state_t, get_remediation_instructions, bool,
 	return FALSE;
 }
 
+METHOD(imv_state_t, reset, void,
+	private_imv_attestation_state_t *this)
+{
+	DESTROY_IF(this->reason_string);
+	this->reason_string = NULL;
+	this->rec  = TNC_IMV_ACTION_RECOMMENDATION_NO_RECOMMENDATION;
+	this->eval = TNC_IMV_EVALUATION_RESULT_DONT_KNOW;
+
+	this->action_flags = 0;
+
+	this->handshake_state = IMV_ATTESTATION_STATE_INIT;
+	this->measurement_error = 0;
+	this->components->destroy_function(this->components, (void *)free_func_comp);
+	this->components = linked_list_create();
+	this->pts->destroy(this->pts);
+	this->pts = pts_create(FALSE);
+}
+
 METHOD(imv_state_t, destroy, void,
 	private_imv_attestation_state_t *this)
 {
@@ -418,24 +440,24 @@ METHOD(imv_attestation_state_t, create_component, pts_component_t*,
 	}
 }
 
-/**
- * Enumerate file measurement entries
- */
-static bool entry_filter(void *null, func_comp_t **entry, uint8_t *flags,
-						 void *i2, uint32_t *depth,
-						 void *i3, pts_comp_func_name_t **comp_name)
+CALLBACK(entry_filter, bool,
+	void *null, enumerator_t *orig, va_list args)
 {
-	pts_component_t *comp;
-	pts_comp_func_name_t *name;
+	func_comp_t *entry;
+	pts_comp_func_name_t **comp_name;
+	uint32_t *depth;
+	uint8_t *flags;
 
-	comp = (*entry)->comp;
-	name = (*entry)->name;
+	VA_ARGS_VGET(args, flags, depth, comp_name);
 
-	*flags = comp->get_evidence_flags(comp);
-	*depth = comp->get_depth(comp);
-	*comp_name = name;
-
-	return TRUE;
+	if (orig->enumerate(orig, &entry))
+	{
+		*flags = entry->comp->get_evidence_flags(entry->comp);
+		*depth = entry->comp->get_depth(entry->comp);
+		*comp_name = entry->name;
+		return TRUE;
+	}
+	return FALSE;
 }
 
 METHOD(imv_attestation_state_t, create_component_enumerator, enumerator_t*,
@@ -443,7 +465,7 @@ METHOD(imv_attestation_state_t, create_component_enumerator, enumerator_t*,
 {
 	return enumerator_create_filter(
 				this->components->create_enumerator(this->components),
-				(void*)entry_filter, NULL, NULL);
+				entry_filter, NULL, NULL);
 }
 
 METHOD(imv_attestation_state_t, get_component, pts_component_t*,
@@ -532,6 +554,7 @@ imv_state_t *imv_attestation_state_create(TNC_ConnectionID connection_id)
 				.update_recommendation = _update_recommendation,
 				.get_reason_string = _get_reason_string,
 				.get_remediation_instructions = _get_remediation_instructions,
+				.reset = _reset,
 				.destroy = _destroy,
 			},
 			.get_handshake_state = _get_handshake_state,

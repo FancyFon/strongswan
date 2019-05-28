@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2013 Tobias Brunner
  * Copyright (C) 2012 Reto Guadagnini
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -62,12 +62,15 @@ typedef struct {
 } cert_enumerator_t;
 
 METHOD(enumerator_t, cert_enumerator_enumerate, bool,
-	cert_enumerator_t *this, certificate_t **cert)
+	cert_enumerator_t *this, va_list args)
 {
+	certificate_t **cert;
 	ipseckey_t *cur_ipseckey;
 	public_key_t *public;
 	rr_t *cur_rr;
 	chunk_t key;
+
+	VA_ARGS_VGET(args, cert);
 
 	/* Get the next supported IPSECKEY using the inner enumerator. */
 	while (this->inner->enumerate(this->inner, &cur_rr))
@@ -211,7 +214,8 @@ METHOD(credential_set_t, create_cert_enumerator, enumerator_t*,
 
 	INIT(e,
 		.public = {
-			.enumerate = (void*)_cert_enumerator_enumerate,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _cert_enumerator_enumerate,
 			.destroy = _cert_enumerator_destroy,
 		},
 		.inner = rrset->create_rr_enumerator(rrset),

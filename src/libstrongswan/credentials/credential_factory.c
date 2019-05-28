@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -163,17 +163,23 @@ METHOD(credential_factory_t, create, void*,
 	return construct;
 }
 
-/**
- * Filter function for builder enumerator
- */
-static bool builder_filter(void *null, entry_t **entry, credential_type_t *type,
-						   void *dummy1, int *subtype)
+CALLBACK(builder_filter, bool,
+	void *null, enumerator_t *orig, va_list args)
 {
-	if ((*entry)->final)
+	entry_t *entry;
+	credential_type_t *type;
+	int *subtype;
+
+	VA_ARGS_VGET(args, type, subtype);
+
+	while (orig->enumerate(orig, &entry))
 	{
-		*type = (*entry)->type;
-		*subtype = (*entry)->subtype;
-		return TRUE;
+		if (entry->final)
+		{
+			*type = entry->type;
+			*subtype = entry->subtype;
+			return TRUE;
+		}
 	}
 	return FALSE;
 }
@@ -184,7 +190,7 @@ METHOD(credential_factory_t, create_builder_enumerator, enumerator_t*,
 	this->lock->read_lock(this->lock);
 	return enumerator_create_filter(
 				this->constructors->create_enumerator(this->constructors),
-				(void*)builder_filter, this->lock, (void*)this->lock->unlock);
+				builder_filter, this->lock, (void*)this->lock->unlock);
 }
 
 METHOD(credential_factory_t, destroy, void,

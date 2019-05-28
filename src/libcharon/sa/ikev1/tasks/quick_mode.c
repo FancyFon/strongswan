@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2012-2015 Tobias Brunner
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * Copyright (C) 2011 Martin Willi
  * Copyright (C) 2011 revosec AG
@@ -325,6 +325,17 @@ static bool install(private_quick_mode_t *this)
 		return FALSE;
 	}
 
+	if (this->initiator)
+	{
+		this->child_sa->set_policies(this->child_sa, tsi, tsr);
+	}
+	else
+	{
+		this->child_sa->set_policies(this->child_sa, tsr, tsi);
+	}
+	tsi->destroy_offset(tsi, offsetof(traffic_selector_t, destroy));
+	tsr->destroy_offset(tsr, offsetof(traffic_selector_t, destroy));
+
 	if (this->keymat->derive_child_keys(this->keymat, this->proposal, this->dh,
 						this->spi_i, this->spi_r, this->nonce_i, this->nonce_r,
 						&encr_i, &integ_i, &encr_r, &integ_r))
@@ -333,19 +344,19 @@ static bool install(private_quick_mode_t *this)
 		{
 			status_i = this->child_sa->install(this->child_sa,
 									encr_r, integ_r, this->spi_i, this->cpi_i,
-									this->initiator, TRUE, FALSE, tsi, tsr);
+									this->initiator, TRUE, FALSE);
 			status_o = this->child_sa->install(this->child_sa,
 									encr_i, integ_i, this->spi_r, this->cpi_r,
-									this->initiator, FALSE, FALSE, tsi, tsr);
+									this->initiator, FALSE, FALSE);
 		}
 		else
 		{
 			status_i = this->child_sa->install(this->child_sa,
 									encr_i, integ_i, this->spi_r, this->cpi_r,
-									this->initiator, TRUE, FALSE, tsr, tsi);
+									this->initiator, TRUE, FALSE);
 			status_o = this->child_sa->install(this->child_sa,
 									encr_r, integ_r, this->spi_i, this->cpi_i,
-									this->initiator, FALSE, FALSE, tsr, tsi);
+									this->initiator, FALSE, FALSE);
 		}
 	}
 
@@ -355,22 +366,12 @@ static bool install(private_quick_mode_t *this)
 			(status_i != SUCCESS) ? "inbound " : "",
 			(status_i != SUCCESS && status_o != SUCCESS) ? "and ": "",
 			(status_o != SUCCESS) ? "outbound " : "");
-		tsi->destroy_offset(tsi, offsetof(traffic_selector_t, destroy));
-		tsr->destroy_offset(tsr, offsetof(traffic_selector_t, destroy));
 		status = FAILED;
 	}
 	else
 	{
-		if (this->initiator)
-		{
-			status = this->child_sa->add_policies(this->child_sa, tsi, tsr);
-		}
-		else
-		{
-			status = this->child_sa->add_policies(this->child_sa, tsr, tsi);
-		}
-		tsi->destroy_offset(tsi, offsetof(traffic_selector_t, destroy));
-		tsr->destroy_offset(tsr, offsetof(traffic_selector_t, destroy));
+		status = this->child_sa->install_policies(this->child_sa);
+
 		if (status != SUCCESS)
 		{
 			DBG1(DBG_IKE, "unable to install IPsec policies (SPD) in kernel");
@@ -395,10 +396,6 @@ static bool install(private_quick_mode_t *this)
 	charon->bus->child_keys(charon->bus, this->child_sa, this->initiator,
 							this->dh, this->nonce_i, this->nonce_r);
 
-	/* add to IKE_SA, and remove from task */
-	this->child_sa->set_state(this->child_sa, CHILD_INSTALLED);
-	this->ike_sa->add_child_sa(this->ike_sa, this->child_sa);
-
 	my_ts = linked_list_create_from_enumerator(
 				this->child_sa->create_ts_enumerator(this->child_sa, TRUE));
 	other_ts = linked_list_create_from_enumerator(
@@ -413,6 +410,9 @@ static bool install(private_quick_mode_t *this)
 
 	my_ts->destroy(my_ts);
 	other_ts->destroy(other_ts);
+
+	this->child_sa->set_state(this->child_sa, CHILD_INSTALLED);
+	this->ike_sa->add_child_sa(this->ike_sa, this->child_sa);
 
 	if (this->rekey)
 	{
@@ -544,7 +544,7 @@ static traffic_selector_t* select_ts(private_quick_mode_t *this, bool local,
 
 	hosts = get_dynamic_hosts(this->ike_sa, local);
 	list = this->config->get_traffic_selectors(this->config,
-											   local, supplied, hosts);
+											   local, supplied, hosts, TRUE);
 	hosts->destroy(hosts);
 	if (list->get_first(list, (void**)&ts) == SUCCESS)
 	{
@@ -703,25 +703,30 @@ static void add_nat_oa_payloads(private_quick_mode_t *this, message_t *message)
 {
 	identification_t *id;
 	id_payload_t *nat_oa;
-	host_t *src, *dst;
+	host_t *init, *resp;
 	payload_type_t nat_oa_payload_type;
 
-	src = message->get_source(message);
-	dst = message->get_destination(message);
-
-	src = this->initiator ? src : dst;
-	dst = this->initiator ? dst : src;
+	if (this->initiator)
+	{
+		init = message->get_source(message);
+		resp = message->get_destination(message);
+	}
+	else
+	{
+		init = message->get_destination(message);
+		resp = message->get_source(message);
+	}
 
 	nat_oa_payload_type = get_nat_oa_payload_type(this->ike_sa);
 
 	/* first NAT-OA is the initiator's address */
-	id = identification_create_from_sockaddr(src->get_sockaddr(src));
+	id = identification_create_from_sockaddr(init->get_sockaddr(init));
 	nat_oa = id_payload_create_from_identification(nat_oa_payload_type, id);
 	message->add_payload(message, (payload_t*)nat_oa);
 	id->destroy(id);
 
 	/* second NAT-OA is that of the responder */
-	id = identification_create_from_sockaddr(dst->get_sockaddr(dst));
+	id = identification_create_from_sockaddr(resp->get_sockaddr(resp));
 	nat_oa = id_payload_create_from_identification(nat_oa_payload_type, id);
 	message->add_payload(message, (payload_t*)nat_oa);
 	id->destroy(id);
@@ -848,7 +853,7 @@ METHOD(task_t, build_i, status_t,
 				add_nat_oa_payloads(this, message);
 			}
 
-			if (this->config->use_ipcomp(this->config))
+			if (this->config->has_option(this->config, OPT_IPCOMP))
 			{
 				this->cpi_i = this->child_sa->alloc_cpi(this->child_sa);
 				if (!this->cpi_i)
@@ -1000,13 +1005,24 @@ static bool has_notify_errors(private_quick_mode_t *this, message_t *message)
 /**
  * Check if this is a rekey for an existing CHILD_SA, reuse reqid if so
  */
-static void check_for_rekeyed_child(private_quick_mode_t *this)
+static void check_for_rekeyed_child(private_quick_mode_t *this, bool responder)
 {
 	enumerator_t *enumerator, *policies;
-	traffic_selector_t *local, *remote;
+	traffic_selector_t *local, *remote, *my_ts, *other_ts;
 	child_sa_t *child_sa;
 	proposal_t *proposal;
 	char *name;
+
+	if (responder)
+	{
+		my_ts = this->tsr;
+		other_ts = this->tsi;
+	}
+	else
+	{
+		my_ts = this->tsi;
+		other_ts = this->tsr;
+	}
 
 	name = this->config->get_name(this->config);
 	enumerator = this->ike_sa->create_child_sa_enumerator(this->ike_sa);
@@ -1021,8 +1037,8 @@ static void check_for_rekeyed_child(private_quick_mode_t *this)
 				case CHILD_REKEYING:
 					policies = child_sa->create_policy_enumerator(child_sa);
 					if (policies->enumerate(policies, &local, &remote) &&
-						local->equals(local, this->tsr) &&
-						remote->equals(remote, this->tsi) &&
+						local->equals(local, my_ts) &&
+						remote->equals(remote, other_ts) &&
 						this->proposal->equals(this->proposal, proposal))
 					{
 						this->reqid = child_sa->get_reqid(child_sa);
@@ -1094,16 +1110,19 @@ METHOD(task_t, process_r, status_t,
 				this->tsi = select_ts(this, FALSE, tsi);
 				this->tsr = select_ts(this, TRUE, tsr);
 			}
-			tsi->destroy_offset(tsi, offsetof(traffic_selector_t, destroy));
-			tsr->destroy_offset(tsr, offsetof(traffic_selector_t, destroy));
 			if (!this->config || !this->tsi || !this->tsr ||
 				this->mode != this->config->get_mode(this->config))
 			{
-				DBG1(DBG_IKE, "no matching CHILD_SA config found");
+				DBG1(DBG_IKE, "no matching CHILD_SA config found for "
+					 "%#R === %#R", tsi, tsr);
+				tsi->destroy_offset(tsi, offsetof(traffic_selector_t, destroy));
+				tsr->destroy_offset(tsr, offsetof(traffic_selector_t, destroy));
 				return send_notify(this, INVALID_ID_INFORMATION);
 			}
+			tsi->destroy_offset(tsi, offsetof(traffic_selector_t, destroy));
+			tsr->destroy_offset(tsr, offsetof(traffic_selector_t, destroy));
 
-			if (this->config->use_ipcomp(this->config))
+			if (this->config->has_option(this->config, OPT_IPCOMP))
 			{
 				list = sa_payload->get_ipcomp_proposals(sa_payload,
 														&this->cpi_i);
@@ -1160,7 +1179,7 @@ METHOD(task_t, process_r, status_t,
 				}
 			}
 
-			check_for_rekeyed_child(this);
+			check_for_rekeyed_child(this, TRUE);
 
 			this->child_sa = child_sa_create(
 									this->ike_sa->get_my_host(this->ike_sa),
@@ -1325,7 +1344,7 @@ METHOD(task_t, process_i, status_t,
 														&this->cpi_r);
 				if (!list->get_count(list))
 				{
-					DBG1(DBG_IKE, "peer did not acccept our IPComp proposal, "
+					DBG1(DBG_IKE, "peer did not accept our IPComp proposal, "
 						 "IPComp disabled");
 					this->cpi_i = 0;
 				}
@@ -1361,6 +1380,7 @@ METHOD(task_t, process_i, status_t,
 			{
 				return send_notify(this, INVALID_PAYLOAD_TYPE);
 			}
+			check_for_rekeyed_child(this, FALSE);
 			if (!install(this))
 			{
 				return send_notify(this, NO_PROPOSAL_CHOSEN);

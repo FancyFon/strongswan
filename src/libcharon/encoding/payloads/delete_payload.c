@@ -3,7 +3,7 @@
  * Copyright (C) 2005-2010 Martin Willi
  * Copyright (C) 2010 revosec AG
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -306,8 +306,12 @@ typedef struct {
 } spi_enumerator_t;
 
 METHOD(enumerator_t, spis_enumerate, bool,
-	spi_enumerator_t *this, uint32_t *spi)
+	spi_enumerator_t *this, va_list args)
 {
+	uint32_t *spi;
+
+	VA_ARGS_VGET(args, spi);
+
 	if (this->spis.len >= sizeof(*spi))
 	{
 		memcpy(spi, this->spis.ptr, sizeof(*spi));
@@ -328,7 +332,8 @@ METHOD(delete_payload_t, create_spi_enumerator, enumerator_t*,
 	}
 	INIT(e,
 		.public = {
-			.enumerate = (void*)_spis_enumerate,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _spis_enumerate,
 			.destroy = (void*)free,
 		},
 		.spis = this->spis,

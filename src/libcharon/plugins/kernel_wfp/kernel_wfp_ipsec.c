@@ -25,8 +25,12 @@
 #include <collections/hashtable.h>
 #include <processing/jobs/callback_job.h>
 
+#ifndef IPPROTO_IPIP
 #define IPPROTO_IPIP 4
+#endif
+#ifndef IPPROTO_IPV6
 #define IPPROTO_IPV6 41
+#endif
 
 typedef struct private_kernel_wfp_ipsec_t private_kernel_wfp_ipsec_t;
 
@@ -1978,7 +1982,7 @@ METHOD(kernel_ipsec_t, get_spi, status_t,
 	private_kernel_wfp_ipsec_t *this, host_t *src, host_t *dst,
 	uint8_t protocol, uint32_t *spi)
 {
-	/* To avoid sequencial SPIs, we use a one-to-one permuation function on
+	/* To avoid sequential SPIs, we use a one-to-one permutation function on
 	 * an incrementing counter, that is a full period PRNG for the range we
 	 * allocate SPIs in. We add some randomness using a fixed XOR and start
 	 * the counter at random position. This is not cryptographically safe,

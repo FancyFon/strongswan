@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -240,6 +240,7 @@ METHOD(ha_message_t, add_attribute, void,
 		case HA_OUTBOUND_CPI:
 		case HA_SEGMENT:
 		case HA_ESN:
+		case HA_AUTH_METHOD:
 		{
 			uint16_t val;
 
@@ -320,7 +321,7 @@ METHOD(ha_message_t, add_attribute, void,
  * Attribute enumerator implementation
  */
 typedef struct {
-	/** implementes enumerator_t */
+	/** implements enumerator_t */
 	enumerator_t public;
 	/** position in message */
 	chunk_t buf;
@@ -331,10 +332,12 @@ typedef struct {
 } attribute_enumerator_t;
 
 METHOD(enumerator_t, attribute_enumerate, bool,
-	attribute_enumerator_t *this, ha_message_attribute_t *attr_out,
-	ha_message_value_t *value)
+	attribute_enumerator_t *this, va_list args)
 {
-	ha_message_attribute_t attr;
+	ha_message_attribute_t attr, *attr_out;
+	ha_message_value_t *value;
+
+	VA_ARGS_VGET(args, attr_out, value);
 
 	if (this->cleanup)
 	{
@@ -461,6 +464,7 @@ METHOD(enumerator_t, attribute_enumerate, bool,
 		case HA_OUTBOUND_CPI:
 		case HA_SEGMENT:
 		case HA_ESN:
+		case HA_AUTH_METHOD:
 		{
 			if (this->buf.len < sizeof(uint16_t))
 			{
@@ -602,7 +606,8 @@ METHOD(ha_message_t, create_attribute_enumerator, enumerator_t*,
 
 	INIT(e,
 		.public = {
-			.enumerate = (void*)_attribute_enumerate,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _attribute_enumerate,
 			.destroy = _enum_destroy,
 		},
 		.buf = chunk_skip(this->buf, 2),

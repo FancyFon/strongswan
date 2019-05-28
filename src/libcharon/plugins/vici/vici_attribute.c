@@ -184,16 +184,22 @@ METHOD(attribute_provider_t, release_address, bool,
 	return found;
 }
 
-/**
- * Filter mapping attribute_t to enumerated type/value arguments
- */
-static bool attr_filter(void *data, attribute_t **attr,
-						configuration_attribute_type_t *type,
-						void *in, chunk_t *value)
+CALLBACK(attr_filter, bool,
+	void *data, enumerator_t *orig, va_list args)
 {
-	*type = (*attr)->type;
-	*value = (*attr)->value;
-	return TRUE;
+	attribute_t *attr;
+	configuration_attribute_type_t *type;
+	chunk_t *value;
+
+	VA_ARGS_VGET(args, type, value);
+
+	if (orig->enumerate(orig, &attr))
+	{
+		*type = attr->type;
+		*value = attr->value;
+		return TRUE;
+	}
+	return FALSE;
 }
 
 /**
@@ -203,7 +209,7 @@ CALLBACK(create_nested, enumerator_t*,
 	pool_t *pool, void *this)
 {
 	return enumerator_create_filter(array_create_enumerator(pool->attrs),
-									(void*)attr_filter, NULL, NULL);
+									attr_filter, NULL, NULL);
 }
 
 /**
@@ -243,7 +249,7 @@ static bool have_vips_from_pool(mem_pool_t *pool, linked_list_t *vips)
 	{
 		end = chunk_clone(start);
 
-		/* mem_pool is currenty limited to 2^31 addresses, so 32-bit
+		/* mem_pool is currently limited to 2^31 addresses, so 32-bit
 		 * calculations should be sufficient. */
 		size = untoh32(start.ptr + start.len - sizeof(size));
 		htoun32(end.ptr + end.len - sizeof(size), size + pool->get_size(pool));
@@ -699,7 +705,7 @@ CALLBACK(get_pools, vici_message_t*,
 			i = 0;
 			builder->begin_section(builder, "leases");
 			leases = vips->create_lease_enumerator(vips);
-			while (leases && leases->enumerate(leases, &uid, &lease, &on))
+			while (leases->enumerate(leases, &uid, &lease, &on))
 			{
 				snprintf(buf, sizeof(buf), "%d", i++);
 				builder->begin_section(builder, buf);

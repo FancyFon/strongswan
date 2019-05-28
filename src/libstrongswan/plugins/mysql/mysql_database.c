@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2013 Tobias Brunner
  * Copyright (C) 2007 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -131,9 +131,13 @@ typedef struct {
  */
 static void conn_release(private_mysql_database_t *this, conn_t *conn)
 {
-	this->mutex->lock(this->mutex);
-	conn->in_use = FALSE;
-	this->mutex->unlock(this->mutex);
+	/* do not release the connection while transactions are using it */
+	if (!this->transaction->get(this->transaction))
+	{
+		this->mutex->lock(this->mutex);
+		conn->in_use = FALSE;
+		this->mutex->unlock(this->mutex);
+	}
 }
 
 /**
@@ -403,10 +407,8 @@ typedef struct {
 	unsigned long *length;
 } mysql_enumerator_t;
 
-/**
- * create a mysql enumerator
- */
-static void mysql_enumerator_destroy(mysql_enumerator_t *this)
+METHOD(enumerator_t, mysql_enumerator_destroy, void,
+	mysql_enumerator_t *this)
 {
 	int columns, i;
 
@@ -434,13 +436,10 @@ static void mysql_enumerator_destroy(mysql_enumerator_t *this)
 	free(this);
 }
 
-/**
- * Implementation of database.query().enumerate
- */
-static bool mysql_enumerator_enumerate(mysql_enumerator_t *this, ...)
+METHOD(enumerator_t, mysql_enumerator_enumerate, bool,
+	mysql_enumerator_t *this, va_list args)
 {
 	int i, columns;
-	va_list args;
 
 	columns = mysql_stmt_field_count(this->stmt);
 
@@ -477,7 +476,6 @@ static bool mysql_enumerator_enumerate(mysql_enumerator_t *this, ...)
 			return FALSE;
 	}
 
-	va_start(args, this);
 	for (i = 0; i < columns; i++)
 	{
 		switch (this->bind[i].buffer_type)
@@ -526,7 +524,6 @@ static bool mysql_enumerator_enumerate(mysql_enumerator_t *this, ...)
 				break;
 		}
 	}
-	va_end(args);
 	return TRUE;
 }
 
@@ -552,9 +549,9 @@ METHOD(database_t, query, enumerator_t*,
 
 		INIT(enumerator,
 			.public = {
-				.enumerate = (void*)mysql_enumerator_enumerate,
-				.destroy = (void*)mysql_enumerator_destroy,
-
+				.enumerate = enumerator_enumerate_default,
+				.venumerate = _mysql_enumerator_enumerate,
+				.destroy = _mysql_enumerator_destroy,
 			},
 			.db = this,
 			.stmt = stmt,

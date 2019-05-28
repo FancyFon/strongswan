@@ -1,8 +1,8 @@
 /*
- * Copyright (C) 2006-2008 Tobias Brunner
+ * Copyright (C) 2006-2017 Tobias Brunner
  * Copyright (C) 2006-2008 Martin Willi
  * Copyright (C) 2006 Daniel Roethlisberger
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -24,12 +24,13 @@
 #define CHILD_SA_H_
 
 typedef enum child_sa_state_t child_sa_state_t;
+typedef enum child_sa_outbound_state_t child_sa_outbound_state_t;
 typedef struct child_sa_t child_sa_t;
 
 #include <library.h>
 #include <crypto/prf_plus.h>
 #include <encoding/payloads/proposal_substructure.h>
-#include <config/proposal.h>
+#include <crypto/proposal/proposal.h>
 #include <config/child_cfg.h>
 
 /**
@@ -53,7 +54,7 @@ enum child_sa_state_t {
 	CHILD_INSTALLING,
 
 	/**
-	 * Installed an in-use CHILD_SA
+	 * Installed both SAs of a CHILD_SA
 	 */
 	CHILD_INSTALLED,
 
@@ -83,6 +84,11 @@ enum child_sa_state_t {
 	CHILD_DELETING,
 
 	/**
+	 * CHILD_SA has been deleted, but not yet destroyed
+	 */
+	CHILD_DELETED,
+
+	/**
 	 * CHILD_SA object gets destroyed
 	 */
 	CHILD_DESTROYING,
@@ -92,6 +98,43 @@ enum child_sa_state_t {
  * enum strings for child_sa_state_t.
  */
 extern enum_name_t *child_sa_state_names;
+
+/**
+ * States of the outbound SA of a CHILD_SA
+ */
+enum child_sa_outbound_state_t {
+
+	/**
+	 * Outbound SA is not installed
+	 */
+	CHILD_OUTBOUND_NONE = 0,
+
+	/**
+	 * Data for the outbound SA has been registered during a rekeying (not set
+	 * once the SA and policies are both installed)
+	 */
+	CHILD_OUTBOUND_REGISTERED = (1<<0),
+
+	/**
+	 * The outbound SA has been installed
+	 */
+	CHILD_OUTBOUND_SA = (1<<1),
+
+	/**
+	 * The outbound policies have been installed
+	 */
+	CHILD_OUTBOUND_POLICIES = (1<<2),
+
+	/**
+	 * The outbound SA and policies are both installed
+	 */
+	CHILD_OUTBOUND_INSTALLED = (CHILD_OUTBOUND_SA|CHILD_OUTBOUND_POLICIES),
+};
+
+/**
+ * enum strings for child_sa_outbound_state_t.
+ */
+extern enum_name_t *child_sa_outbound_state_names;
 
 /**
  * Represents an IPsec SAs between two hosts.
@@ -107,7 +150,7 @@ extern enum_name_t *child_sa_state_names;
  * - B allocates an SPI for the selected protocol
  * - B calls child_sa_t.install for both, the allocated and received SPI
  * - B sends the proposal with the allocated SPI to A
- * - A calls child_sa_t.install for both, the allocated and recevied SPI
+ * - A calls child_sa_t.install for both, the allocated and received SPI
  *
  * Once SAs are set up, policies can be added using add_policies.
  */
@@ -152,7 +195,14 @@ struct child_sa_t {
 	 *
 	 * @return 			CHILD_SA state
 	 */
-	child_sa_state_t (*get_state) (child_sa_t *this);
+	child_sa_state_t (*get_state)(child_sa_t *this);
+
+	/**
+	 * Get the state of the outbound SA.
+	 *
+	 * @return 			outbound SA state
+	 */
+	child_sa_outbound_state_t (*get_outbound_state)(child_sa_t *this);
 
 	/**
 	 * Set the state of the CHILD_SA.
@@ -209,7 +259,7 @@ struct child_sa_t {
 	/**
 	 * Set the negotiated IPsec mode to use.
 	 *
-	 * @param mode		TUNNEL | TRANPORT | BEET
+	 * @param mode		TUNNEL | TRANSPORT | BEET
 	 */
 	void (*set_mode)(child_sa_t *this, ipsec_mode_t mode);
 
@@ -347,6 +397,8 @@ struct child_sa_t {
 	/**
 	 * Install an IPsec SA for one direction.
 	 *
+	 * set_policies() should be called before calling this.
+	 *
 	 * @param encr		encryption key, if any
 	 * @param integ		integrity key
 	 * @param spi		SPI to use, allocated for inbound
@@ -354,26 +406,87 @@ struct child_sa_t {
 	 * @param initiator	TRUE if initiator of exchange resulting in this SA
 	 * @param inbound	TRUE to install an inbound SA, FALSE for outbound
 	 * @param tfcv3		TRUE if peer supports ESPv3 TFC
-	 * @param my_ts		negotiated local traffic selector list
-	 * @param other_ts	negotiated remote traffic selector list
 	 * @return			SUCCESS or FAILED
 	 */
 	status_t (*install)(child_sa_t *this, chunk_t encr, chunk_t integ,
 						uint32_t spi, uint16_t cpi,
-						bool initiator, bool inbound, bool tfcv3,
-						linked_list_t *my_ts, linked_list_t *other_ts);
+						bool initiator, bool inbound, bool tfcv3);
+
 	/**
-	 * Install the policies using some traffic selectors.
+	 * Register data for the installation of an outbound SA as responder during
+	 * a rekeying.
+	 *
+	 * If the kernel is able to handle SPIs on policies the SA is installed
+	 * immediately, if not it won't be installed until install_outbound() is
+	 * called.
+	 *
+	 * @param encr		encryption key, if any (cloned)
+	 * @param integ		integrity key (cloned)
+	 * @param spi		SPI to use, allocated for inbound
+	 * @param cpi		CPI to use, allocated for outbound
+	 * @param tfcv3		TRUE if peer supports ESPv3 TFC
+	 * @return			SUCCESS or FAILED
+	 */
+	status_t (*register_outbound)(child_sa_t *this, chunk_t encr, chunk_t integ,
+								  uint32_t spi, uint16_t cpi, bool tfcv3);
+
+	/**
+	 * Install the outbound policies and, if not already done, the outbound SA
+	 * as responder during a rekeying.
+	 *
+	 * @return			SUCCESS or FAILED
+	 */
+	status_t (*install_outbound)(child_sa_t *this);
+
+	/**
+	 * Remove the outbound SA and the outbound policies after a rekeying.
+	 */
+	void (*remove_outbound)(child_sa_t *this);
+
+	/**
+	 * Configure the policies using some traffic selectors.
 	 *
 	 * Supplied lists of traffic_selector_t's specify the policies
 	 * to use for this child sa.
 	 *
-	 * @param my_ts		traffic selectors for local site
-	 * @param other_ts	traffic selectors for remote site
+	 * Install the policies by calling install_policies().
+	 *
+	 * This should be called before calling install() so the traffic selectors
+	 * may be passed to the kernel interface when installing the SAs.
+	 *
+	 * @param my_ts		traffic selectors for local site (cloned)
+	 * @param other_ts	traffic selectors for remote site (cloned)
+	 */
+	void (*set_policies)(child_sa_t *this, linked_list_t *my_ts_list,
+						 linked_list_t *other_ts_list);
+
+	/**
+	 * Install the configured policies.
+	 *
+	 * If register_outbound() was called previously this only installs the
+	 * inbound and forward policies, the outbound policies are installed when
+	 * install_outbound() is called.
+	 *
 	 * @return			SUCCESS or FAILED
 	 */
-	status_t (*add_policies)(child_sa_t *this, linked_list_t *my_ts_list,
-							 linked_list_t *other_ts_list);
+	status_t (*install_policies)(child_sa_t *this);
+
+	/**
+	 * Set the outbound SPI of the CHILD_SA that replaced this CHILD_SA during
+	 * a rekeying.
+	 *
+	 * @param spi		outbound SPI of the CHILD_SA that replaced this CHILD_SA
+	 */
+	void (*set_rekey_spi)(child_sa_t *this, uint32_t spi);
+
+	/**
+	 * Get the outbound SPI of the CHILD_SA that replaced this CHILD_SA during
+	 * a rekeying.
+	 *
+	 * @return			outbound SPI of the CHILD_SA that replaced this CHILD_SA
+	 */
+	uint32_t (*get_rekey_spi)(child_sa_t *this);
+
 	/**
 	 * Update hosts and ecapulation mode in the kernel SAs and policies.
 	 *

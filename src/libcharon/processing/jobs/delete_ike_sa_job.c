@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2005-2006 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -64,7 +64,7 @@ METHOD(job_t, execute, job_requeue_t,
 		}
 		if (this->delete_if_established)
 		{
-			if (ike_sa->delete(ike_sa) == DESTROY_ME)
+			if (ike_sa->delete(ike_sa, FALSE) == DESTROY_ME)
 			{
 				charon->ike_sa_manager->checkin_and_destroy(
 												charon->ike_sa_manager, ike_sa);
@@ -93,7 +93,8 @@ METHOD(job_t, execute, job_requeue_t,
 			}
 			else
 			{
-				DBG1(DBG_JOB, "deleting half open IKE_SA after timeout");
+				DBG1(DBG_JOB, "deleting half open IKE_SA with %H after "
+					 "timeout", ike_sa->get_other_host(ike_sa));
 				charon->bus->alert(charon->bus, ALERT_HALF_OPEN_TIMEOUT);
 				charon->ike_sa_manager->checkin_and_destroy(
 												charon->ike_sa_manager, ike_sa);

@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2006-2013 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  * Copyright (C) 2013 revosec AG
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -668,8 +668,12 @@ typedef struct {
 } frame_enumerator_t;
 
 METHOD(enumerator_t, frame_enumerate, bool,
-	frame_enumerator_t *this, void **addr)
+	frame_enumerator_t *this, va_list args)
 {
+	void **addr;
+
+	VA_ARGS_VGET(args, addr);
+
 	if (this->i < this->bt->frame_count)
 	{
 		*addr = this->bt->frames[this->i++];
@@ -685,7 +689,8 @@ METHOD(backtrace_t, create_frame_enumerator, enumerator_t*,
 
 	INIT(enumerator,
 		.public = {
-			.enumerate = (void*)_frame_enumerate,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _frame_enumerate,
 			.destroy = (void*)free,
 		},
 		.bt = this,

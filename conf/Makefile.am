@@ -9,7 +9,6 @@ pluginstemplatedir = $(templatesdir)/plugins
 
 options = \
 	options/aikgen.opt \
-	options/aikpub2.opt \
 	options/attest.opt \
 	options/charon.opt \
 	options/charon-logging.opt \
@@ -19,15 +18,17 @@ options = \
 	options/imv_policy_manager.opt \
 	options/manager.opt \
 	options/medsrv.opt \
-	options/pacman.opt \
 	options/pki.opt \
 	options/pool.opt \
 	options/scepclient.opt \
 	options/starter.opt \
 	options/swanctl.opt \
-	options/tnc.opt
+	options/tnc.opt \
+	options/sec-updater.opt \
+	options/sw-collector.opt
 
 plugins = \
+	plugins/addrblock.opt \
 	plugins/android_log.opt \
 	plugins/attr.opt \
 	plugins/attr-sql.opt \
@@ -35,11 +36,13 @@ plugins = \
 	plugins/bypass-lan.opt \
 	plugins/certexpire.opt \
 	plugins/coupling.opt \
+	plugins/curl.opt \
 	plugins/dhcp.opt \
 	plugins/dnscert.opt \
 	plugins/duplicheck.opt \
 	plugins/eap-aka.opt \
-	plugins/eap-aka-3ggp2.opt \
+	plugins/eap-aka-3gpp.opt \
+	plugins/eap-aka-3gpp2.opt \
 	plugins/eap-dynamic.opt \
 	plugins/eap-gtc.opt \
 	plugins/eap-peap.opt \
@@ -58,12 +61,12 @@ plugins = \
 	plugins/imc-hcd.opt \
 	plugins/imc-os.opt \
 	plugins/imc-scanner.opt \
-	plugins/imc-swid.opt \
+	plugins/imc-swima.opt \
 	plugins/imc-test.opt \
 	plugins/imv-attestation.opt \
 	plugins/imv-os.opt \
 	plugins/imv-scanner.opt \
-	plugins/imv-swid.opt \
+	plugins/imv-swima.opt \
 	plugins/imv-test.opt \
 	plugins/ipseckey.opt \
 	plugins/led.opt \
@@ -82,6 +85,7 @@ plugins = \
 	plugins/random.opt \
 	plugins/resolve.opt \
 	plugins/revocation.opt \
+	plugins/save-keys.opt \
 	plugins/socket-default.opt \
 	plugins/sql.opt \
 	plugins/stroke.opt \
@@ -92,6 +96,7 @@ plugins = \
 	plugins/tnc-pdp.opt \
 	plugins/tnccs-11.opt \
 	plugins/tnccs-20.opt \
+	plugins/tpm.opt \
 	plugins/unbound.opt \
 	plugins/updown.opt \
 	plugins/vici.opt \

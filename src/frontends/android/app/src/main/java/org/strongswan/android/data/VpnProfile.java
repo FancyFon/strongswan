@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2016 Tobias Brunner
+ * Copyright (C) 2012-2018 Tobias Brunner
  * Copyright (C) 2012 Giuliano Grassi
  * Copyright (C) 2012 Ralf Sager
  * HSR Hochschule fuer Technik Rapperswil
@@ -20,8 +20,15 @@ package org.strongswan.android.data;
 
 import android.content.res.Resources;
 import android.os.Bundle;
+import android.text.TextUtils;
+
 import org.strongswan.android.R;
+
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.UUID;
 
 public class VpnProfile implements Cloneable
 {
@@ -30,32 +37,55 @@ public class VpnProfile implements Cloneable
 	public static final int SPLIT_TUNNELING_BLOCK_IPV6 = 2;
 	public static final int DEFAULT_LOGGING_LEVEL = 1;
 
-	private String mName;
-	private String mGateway;
-	private String mUsername;
-	private String mPassword;
-	private String mCertificate;
-	private String mUserCertificate;
-	private String mRemoteId;
-	private String mLocalId;
-	private Integer mMTU;
-	private Integer mPort;
-	private Integer mSplitTunneling;
+	public static final int FLAGS_SUPPRESS_CERT_REQS = 1 << 0;
+	public static final int FLAGS_DISABLE_CRL = 1 << 1;
+	public static final int FLAGS_DISABLE_OCSP = 1 << 2;
+	public static final int FLAGS_STRICT_REVOCATION = 1 << 3;
+	public static final int FLAGS_RSA_PSS = 1 << 4;
+
+	private String mName, mGateway, mUsername, mPassword, mCertificate, mUserCertificate;
+	private String mRemoteId, mLocalId, mExcludedSubnets, mIncludedSubnets, mSelectedApps;
+	private String mIkeProposal, mEspProposal;
+	private Integer mMTU, mPort, mSplitTunneling, mNATKeepAlive, mFlags;
+	private SelectedAppsHandling mSelectedAppsHandling = SelectedAppsHandling.SELECTED_APPS_DISABLE;
+	private VpnType mVpnType;
+	private UUID mUUID;
+	private long mId = -1;
+
 	private String mCertificateId;
 	private ArrayList<String> allowedApplications = new ArrayList<String>();
-	private VpnType mVpnType;
-	private long mId = -1;
 	private int mLoggingLevel;
 
+	public enum SelectedAppsHandling
+	{
+		SELECTED_APPS_DISABLE(0),
+		SELECTED_APPS_EXCLUDE(1),
+		SELECTED_APPS_ONLY(2);
 
-    public VpnProfile() {
-    }
+		private Integer mValue;
 
-    public VpnProfile(Bundle bundle, Resources resources) {
-        fromBundle(bundle, resources);
-    }
+		SelectedAppsHandling(int value)
+		{
+			mValue = value;
+		}
 
-    public long getId()
+		public Integer getValue()
+		{
+			return mValue;
+		}
+	}
+
+	public VpnProfile()
+	{
+		this.mUUID = UUID.randomUUID();
+	}
+
+	public VpnProfile(Bundle bundle, Resources resources) {
+		this.mUUID = UUID.randomUUID();
+		fromBundle(bundle, resources);
+	}
+
+	public long getId()
 	{
 		return mId;
 	}
@@ -63,6 +93,16 @@ public class VpnProfile implements Cloneable
 	public void setId(long id)
 	{
 		this.mId = id;
+	}
+
+	public void setUUID(UUID uuid)
+	{
+		this.mUUID = uuid;
+	}
+
+	public UUID getUUID()
+	{
+		return mUUID;
 	}
 
 	public String getName()
@@ -93,6 +133,26 @@ public class VpnProfile implements Cloneable
 	public void setVpnType(VpnType type)
 	{
 		this.mVpnType = type;
+	}
+
+	public String getIkeProposal()
+	{
+		return mIkeProposal;
+	}
+
+	public void setIkeProposal(String proposal)
+	{
+		this.mIkeProposal = proposal;
+	}
+
+	public String getEspProposal()
+	{
+		return mEspProposal;
+	}
+
+	public void setEspProposal(String proposal)
+	{
+		this.mEspProposal = proposal;
 	}
 
 	public String getUsername()
@@ -175,6 +235,84 @@ public class VpnProfile implements Cloneable
 		this.mPort = port;
 	}
 
+	public Integer getNATKeepAlive()
+	{
+		return mNATKeepAlive;
+	}
+
+	public void setNATKeepAlive(Integer keepalive)
+	{
+		this.mNATKeepAlive = keepalive;
+	}
+
+	public void setExcludedSubnets(String excludedSubnets)
+	{
+		this.mExcludedSubnets = excludedSubnets;
+	}
+
+	public String getExcludedSubnets()
+	{
+		return mExcludedSubnets;
+	}
+
+	public void setIncludedSubnets(String includedSubnets)
+	{
+		this.mIncludedSubnets = includedSubnets;
+	}
+
+	public String getIncludedSubnets()
+	{
+		return mIncludedSubnets;
+	}
+
+	public void setSelectedApps(String selectedApps)
+	{
+		this.mSelectedApps = selectedApps;
+	}
+
+	public void setSelectedApps(SortedSet<String> selectedApps)
+	{
+		this.mSelectedApps = selectedApps.size() > 0 ? TextUtils.join(" ", selectedApps) : null;
+	}
+
+	public String getSelectedApps()
+	{
+		return mSelectedApps;
+	}
+
+	public SortedSet<String> getSelectedAppsSet()
+	{
+		TreeSet<String> set = new TreeSet<>();
+		if (!TextUtils.isEmpty(mSelectedApps))
+		{
+			set.addAll(Arrays.asList(mSelectedApps.split("\\s+")));
+		}
+		return set;
+	}
+
+	public void setSelectedAppsHandling(SelectedAppsHandling selectedAppsHandling)
+	{
+		this.mSelectedAppsHandling = selectedAppsHandling;
+	}
+
+	public void setSelectedAppsHandling(Integer value)
+	{
+		mSelectedAppsHandling = SelectedAppsHandling.SELECTED_APPS_DISABLE;
+		for (SelectedAppsHandling handling : SelectedAppsHandling.values())
+		{
+			if (handling.mValue.equals(value))
+			{
+				mSelectedAppsHandling = handling;
+				break;
+			}
+		}
+	}
+
+	public SelectedAppsHandling getSelectedAppsHandling()
+	{
+		return mSelectedAppsHandling;
+	}
+
 	public Integer getSplitTunneling()
 	{
 		return mSplitTunneling;
@@ -185,7 +323,15 @@ public class VpnProfile implements Cloneable
 		this.mSplitTunneling = splitTunneling;
 	}
 
+	public Integer getFlags()
+	{
+		return mFlags == null ? 0 : mFlags;
+	}
 
+	public void setFlags(Integer flags)
+	{
+		this.mFlags = flags;
+	}
 
 	public ArrayList<String> getAllowedApplications() {
 		return allowedApplications;
@@ -195,13 +341,13 @@ public class VpnProfile implements Cloneable
 		this.allowedApplications = allowedApplications;
 	}
 
-    public String getCertificateId() {
-        return mCertificateId;
-    }
+	public String getCertificateId() {
+		return mCertificateId;
+	}
 
-    public void setCertificateId(String mCertificateId) {
-        this.mCertificateId = mCertificateId;
-    }
+	public void setCertificateId(String mCertificateId) {
+		this.mCertificateId = mCertificateId;
+	}
 
 
 	public int getLoggingLevel() {
@@ -212,19 +358,53 @@ public class VpnProfile implements Cloneable
 		this.mLoggingLevel = mLoggingLevel;
 	}
 
-    @Override
+	public Bundle toBundle(Resources resources) {
+		Bundle bundle = new Bundle();
+		bundle.putLong(resources.getString(R.string.vpn_profile_bundle_id_key), getId());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_certificate_alias_key), getCertificateAlias());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_gateway_key), getGateway());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_name_key), getName());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_password_key), getPassword());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_type_key), getVpnType().name());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key), getUserCertificateAlias());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_username_key), getUsername());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key), getCertificateId());
+		bundle.putStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications), getAllowedApplications());
+		bundle.putInt(resources.getString(R.string.vpn_profile_bundle_logging_level),getLoggingLevel());
+		return bundle;
+	}
+
+	private void fromBundle(Bundle bundle, Resources resources) {
+		mId = bundle.getLong(resources.getString(R.string.vpn_profile_bundle_id_key));
+		mCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_alias_key));
+		mGateway = bundle.getString(resources.getString(R.string.vpn_profile_bundle_gateway_key));
+		mName = bundle.getString(resources.getString(R.string.vpn_profile_bundle_name_key));
+		mPassword = bundle.getString(resources.getString(R.string.vpn_profile_bundle_password_key));
+		mVpnType = VpnType.fromIdentifier(bundle.getString(resources.getString(R.string.vpn_profile_bundle_type_key)));
+		mUserCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key));
+		mUsername = bundle.getString(resources.getString(R.string.vpn_profile_bundle_username_key));
+		mCertificateId = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key));
+		allowedApplications = bundle.getStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications));
+		mLoggingLevel = bundle.getInt(resources.getString(R.string.vpn_profile_bundle_logging_level), DEFAULT_LOGGING_LEVEL);
+	}
+
+	@Override
 	public String toString()
 	{
 		return mName;
 	}
 
-	//FF different equals
 	@Override
 	public boolean equals(Object o)
 	{
 		if (o != null && o instanceof VpnProfile)
 		{
-			return this.mId == ((VpnProfile)o).getId();
+			VpnProfile other = (VpnProfile)o;
+			if (this.mUUID != null && other.getUUID() != null)
+			{
+				return this.mUUID.equals(other.getUUID());
+			}
+			return this.mId == other.getId();
 		}
 		return false;
 	}
@@ -241,34 +421,4 @@ public class VpnProfile implements Cloneable
 			throw new AssertionError();
 		}
 	}
-
-    public Bundle toBundle(Resources resources) {
-        Bundle bundle = new Bundle();
-        bundle.putLong(resources.getString(R.string.vpn_profile_bundle_id_key), getId());
-        bundle.putString(resources.getString(R.string.vpn_profile_bundle_certificate_alias_key), getCertificateAlias());
-        bundle.putString(resources.getString(R.string.vpn_profile_bundle_gateway_key), getGateway());
-        bundle.putString(resources.getString(R.string.vpn_profile_bundle_name_key), getName());
-        bundle.putString(resources.getString(R.string.vpn_profile_bundle_password_key), getPassword());
-        bundle.putString(resources.getString(R.string.vpn_profile_bundle_type_key), getVpnType().name());
-        bundle.putString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key), getUserCertificateAlias());
-        bundle.putString(resources.getString(R.string.vpn_profile_bundle_username_key), getUsername());
-		bundle.putString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key), getCertificateId());
-		bundle.putStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications), getAllowedApplications());
-		bundle.putInt(resources.getString(R.string.vpn_profile_bundle_logging_level),getLoggingLevel());
-        return bundle;
-    }
-
-    private void fromBundle(Bundle bundle, Resources resources) {
-        mId = bundle.getLong(resources.getString(R.string.vpn_profile_bundle_id_key));
-        mCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_alias_key));
-        mGateway = bundle.getString(resources.getString(R.string.vpn_profile_bundle_gateway_key));
-        mName = bundle.getString(resources.getString(R.string.vpn_profile_bundle_name_key));
-        mPassword = bundle.getString(resources.getString(R.string.vpn_profile_bundle_password_key));
-        mVpnType = VpnType.fromIdentifier(bundle.getString(resources.getString(R.string.vpn_profile_bundle_type_key)));
-        mUserCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key));
-        mUsername = bundle.getString(resources.getString(R.string.vpn_profile_bundle_username_key));
-		mCertificateId = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key));
- 		allowedApplications = bundle.getStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications));
-		mLoggingLevel = bundle.getInt(resources.getString(R.string.vpn_profile_bundle_logging_level), DEFAULT_LOGGING_LEVEL);
-    }
 }

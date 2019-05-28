@@ -1,8 +1,8 @@
 # The Versatile IKE Control Interface (VICI) protocol #
 
-The vici plugin implements the server side of an IPC protocol to configure,
-monitor and control the IKE daemon charon. It uses request/response and event
-messages to communicate over a reliable stream based transport.
+The vici _[ˈvitʃi]_ plugin implements the server side of an IPC protocol to
+configure, monitor and control the IKE daemon charon. It uses request/response
+and event messages to communicate over a reliable stream based transport.
 
 ## Transport protocol ##
 
@@ -75,7 +75,7 @@ for example.
 
 The defined packet types optionally wrap a message with additional data.
 Messages are currently used in CMD_REQUEST/CMD_RESPONSE, and in EVENT packets.
-A message uses a hierarchial tree of sections. Each section (or the implicit
+A message uses a hierarchical tree of sections. Each section (or the implicit
 root section) contains an arbitrary set of key/value pairs, lists and
 sub-sections. The length of a message is not part of the message itself, but
 the wrapping layer, usually calculated from the transport byte sequence length.
@@ -140,7 +140,7 @@ Consider the following structure using pseudo-markup for this example:
 		list1 = [ item1, item2 ]
 	}
 
-The example above reprensents a valid tree structure, that gets encoded as
+The example above represents a valid tree structure, that gets encoded as
 the following C array:
 
 	char msg[] = {
@@ -258,7 +258,7 @@ Initiates an SA while streaming _control-log_ events.
 
 	{
 		child = <CHILD_SA configuration name to initiate>
-		ike = <optional IKE_SA configuraiton name to find child under>
+		ike = <optional IKE_SA configuration name to find child under>
 		timeout = <timeout in ms before returning>
 		init-limits = <whether limits may prevent initiating the CHILD_SA>
 		loglevel = <loglevel to issue "control-log" events for>
@@ -279,7 +279,9 @@ Terminates an SA while streaming _control-log_ events.
 		ike = <terminate an IKE_SA by configuration name>
 		child-id = <terminate a CHILD_SA by its reqid>
 		ike-id = <terminate an IKE_SA by its unique id>
-		timeout = <timeout in ms before returning>
+		force = <terminate IKE_SA without waiting for proper DELETE, if timeout
+				 is given, waits for a response until it is reached>
+		timeout = <timeout in ms before returning, see below>
 		loglevel = <loglevel to issue "control-log" events for>
 	} => {
 		success = <yes or no>
@@ -300,6 +302,7 @@ Initiate the rekeying of an SA.
 		ike = <rekey an IKE_SA by configuration name>
 		child-id = <rekey a CHILD_SA by its reqid>
 		ike-id = <rekey an IKE_SA by its unique id>
+		reauth = <reauthenticate instead of rekey an IKEv2 SA>
 	} => {
 		success = <yes or no>
 		matches = <number of matched SAs>
@@ -480,11 +483,12 @@ Load a certificate into the daemon.
 Load a private key into the daemon.
 
 	{
-		type = <private key type, RSA|ECDSA>
+		type = <private key type, rsa|ecdsa|bliss|any>
 		data = <PEM or DER encoded key data>
 	} => {
 		success = <yes or no>
 		errmsg = <error string on failure>
+		id = <hex-encoded SHA-1 key identifier of the public key on success>
 	}
 
 ### unload-key() ###
@@ -529,11 +533,11 @@ on the key identifier derived from the public key).
 
 ### load-shared() ###
 
-Load a shared IKE PSK, EAP or XAuth secret into the daemon.
+Load a shared IKE PSK, EAP, XAuth or NTLM secret into the daemon.
 
 	{
 		id = <optional unique identifier of this shared key>
-		type = <shared key type, IKE|EAP|XAUTH>
+		type = <shared key type, IKE|EAP|XAUTH|NTLM>
 		data = <raw shared key data>
 		owners = [
 			<list of shared key owner identities>
@@ -545,8 +549,8 @@ Load a shared IKE PSK, EAP or XAuth secret into the daemon.
 
 ### unload-shared() ###
 
-Unload a previously loaded shared IKE PSK, EAP or XAuth secret by its unique
-identifier.
+Unload a previously loaded shared IKE PSK, EAP, XAuth or NTLM secret by its
+unique identifier.
 
 	{
 		id = <unique identifier of the shared key to unload>
@@ -679,6 +683,35 @@ List currently loaded algorithms and their implementation.
 		<algorithm type> = {
 			<algorithm> = <plugin providing the implementation>
 		}
+	}
+
+### get-counters() ###
+
+List global or connection-specific counters for several IKE events.
+
+	{
+		name = <optional connection name, omit for global counters>
+		all = <yes to get counters for all connections, name is ignored>
+	} => {
+		counters = {
+			<name|empty for global counters> = {
+				<pairs of counter name and 64-bit counter value>
+			}
+		}
+		success = <yes or no>
+		errmsg = <error string on failure>
+	}
+
+### reset-counters() ###
+
+Reset global or connection-specific IKE event counters.
+
+	{
+		name = <optional connection name, omit for global counters>
+		all = <yes to reset counters for all connections, name is ignored>
+	} => {
+		success = <yes or no>
+		errmsg = <error string on failure>
 	}
 
 ## Server-issued events ##

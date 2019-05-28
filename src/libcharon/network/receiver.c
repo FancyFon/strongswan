@@ -2,7 +2,7 @@
  * Copyright (C) 2008-2012 Tobias Brunner
  * Copyright (C) 2005-2006 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -321,18 +321,16 @@ static bool cookie_required(private_receiver_t *this,
  */
 static bool drop_ike_sa_init(private_receiver_t *this, message_t *message)
 {
-	u_int half_open, half_open_r;
+	u_int half_open;
 	uint32_t now;
 
 	now = time_monotonic(NULL);
 	half_open = charon->ike_sa_manager->get_half_open_count(
-										charon->ike_sa_manager, NULL, FALSE);
-	half_open_r = charon->ike_sa_manager->get_half_open_count(
 										charon->ike_sa_manager, NULL, TRUE);
 
 	/* check for cookies in IKEv2 */
 	if (message->get_major_version(message) == IKEV2_MAJOR_VERSION &&
-		cookie_required(this, half_open_r, now) && !check_cookie(this, message))
+		cookie_required(this, half_open, now) && !check_cookie(this, message))
 	{
 		chunk_t cookie;
 
@@ -648,13 +646,13 @@ receiver_t *receiver_create()
 	this->receive_delay = lib->settings->get_int(lib->settings,
 					"%s.receive_delay", 0, lib->ns);
 	this->receive_delay_type = lib->settings->get_int(lib->settings,
-					"%s.receive_delay_type", 0, lib->ns),
+					"%s.receive_delay_type", 0, lib->ns);
 	this->receive_delay_request = lib->settings->get_bool(lib->settings,
-					"%s.receive_delay_request", TRUE, lib->ns),
+					"%s.receive_delay_request", TRUE, lib->ns);
 	this->receive_delay_response = lib->settings->get_bool(lib->settings,
-					"%s.receive_delay_response", TRUE, lib->ns),
+					"%s.receive_delay_response", TRUE, lib->ns);
 	this->initiator_only = lib->settings->get_bool(lib->settings,
-					"%s.initiator_only", FALSE, lib->ns),
+					"%s.initiator_only", FALSE, lib->ns);
 
 	this->hasher = lib->crypto->create_hasher(lib->crypto, HASH_SHA1);
 	if (!this->hasher)

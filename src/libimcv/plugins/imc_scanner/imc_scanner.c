@@ -85,15 +85,6 @@ TNC_Result TNC_IMC_NotifyConnectionChange(TNC_IMCID imc_id,
 		case TNC_CONNECTION_STATE_CREATE:
 			state = imc_scanner_state_create(connection_id);
 			return imc_scanner->create_state(imc_scanner, state);
-		case TNC_CONNECTION_STATE_HANDSHAKE:
-			if (imc_scanner->change_state(imc_scanner, connection_id, new_state,
-				&state) != TNC_RESULT_SUCCESS)
-			{
-				return TNC_RESULT_FATAL;
-			}
-			state->set_result(state, imc_id,
-							  TNC_IMV_EVALUATION_RESULT_DONT_KNOW);
-			return TNC_RESULT_SUCCESS;
 		case TNC_CONNECTION_STATE_DELETE:
 			return imc_scanner->delete_state(imc_scanner, connection_id);
 		default:
@@ -116,7 +107,7 @@ static bool do_netstat(ietf_attr_port_filter_t *attr)
 	const char loopback_v4[] = "127.0.0.1";
 	const char loopback_v6[] = "::1";
 
-	/* Open a pipe stream for reading the output of the netstat commmand */
+	/* Open a pipe stream for reading the output of the netstat command */
 	file = popen("/bin/netstat -n -l -p -4 -6 --inet", "r");
 	if (!file)
 	{

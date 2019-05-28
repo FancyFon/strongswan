@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2009 Martin Willi
- * Copyright (C) 2015-2016 Andreas Steffen
+ * Copyright (C) 2015-2017 Andreas Steffen
  * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -61,6 +61,7 @@ static int issue()
 {
 	cred_encoding_type_t form = CERT_ASN1_DER;
 	hash_algorithm_t digest = HASH_UNKNOWN;
+	signature_params_t *scheme = NULL;
 	certificate_t *cert_req = NULL, *cert = NULL, *ca =NULL;
 	private_key_t *private = NULL;
 	public_key_t *public = NULL;
@@ -71,6 +72,7 @@ static int issue()
 	char *error = NULL, *keyid = NULL;
 	identification_t *id = NULL;
 	linked_list_t *san, *cdps, *ocsp, *permitted, *excluded, *policies, *mappings;
+	linked_list_t *addrblocks;
 	int pathlen = X509_NO_CONSTRAINT, inhibit_any = X509_NO_CONSTRAINT;
 	int inhibit_mapping = X509_NO_CONSTRAINT, require_explicit = X509_NO_CONSTRAINT;
 	chunk_t serial = chunk_empty;
@@ -81,7 +83,10 @@ static int issue()
 	x509_t *x509;
 	x509_cdp_t *cdp = NULL;
 	x509_cert_policy_t *policy = NULL;
+	traffic_selector_t *ts;
 	char *arg;
+	bool pss = lib->settings->get_bool(lib->settings, "%s.rsa_pss", FALSE,
+									   lib->ns);
 
 	san = linked_list_create();
 	cdps = linked_list_create();
@@ -90,6 +95,7 @@ static int issue()
 	excluded = linked_list_create();
 	policies = linked_list_create();
 	mappings = linked_list_create();
+	addrblocks = linked_list_create();
 
 	while (TRUE)
 	{
@@ -140,6 +146,17 @@ static int issue()
 					goto usage;
 				}
 				continue;
+			case 'R':
+				if (streq(arg, "pss"))
+				{
+					pss = TRUE;
+				}
+				else if (!streq(arg, "pkcs1"))
+				{
+					error = "invalid RSA padding";
+					goto usage;
+				}
+				continue;
 			case 'i':
 				file = arg;
 				continue;
@@ -183,6 +200,15 @@ static int issue()
 				continue;
 			case 'p':
 				pathlen = atoi(arg);
+				continue;
+			case 'B':
+				ts = parse_ts(arg);
+				if (!ts)
+				{
+					error = "invalid addressBlock";
+					goto usage;
+				}
+				addrblocks->insert_last(addrblocks, ts);
 				continue;
 			case 'n':
 				permitted->insert_last(permitted,
@@ -384,16 +410,13 @@ static int issue()
 		error = "loading CA private key failed";
 		goto end;
 	}
-	if (digest == HASH_UNKNOWN)
-	{
-		digest = get_default_digest(private);
-	}
 	if (!private->belongs_to(private, public))
 	{
 		error = "CA private key does not match CA certificate";
 		goto end;
 	}
 	public->destroy(public);
+	public = NULL;
 
 	if (hex)
 	{
@@ -512,14 +535,20 @@ static int issue()
 		id = identification_create_from_encoding(ID_DER_ASN1_DN,
 										chunk_from_chars(ASN1_SEQUENCE, 0));
 	}
+	scheme = get_signature_scheme(private, digest, pss);
+	if (!scheme)
+	{
+		error = "no signature scheme found";
+		goto end;
+	}
 
 	cert = lib->creds->create(lib->creds, CRED_CERTIFICATE, CERT_X509,
 					BUILD_SIGNING_KEY, private, BUILD_SIGNING_CERT, ca,
 					BUILD_PUBLIC_KEY, public, BUILD_SUBJECT, id,
-					BUILD_NOT_BEFORE_TIME, not_before, BUILD_DIGEST_ALG, digest,
+					BUILD_NOT_BEFORE_TIME, not_before,
 					BUILD_NOT_AFTER_TIME, not_after, BUILD_SERIAL, serial,
 					BUILD_SUBJECT_ALTNAMES, san, BUILD_X509_FLAG, flags,
-					BUILD_PATHLEN, pathlen,
+					BUILD_PATHLEN, pathlen, BUILD_ADDRBLOCKS, addrblocks,
 					BUILD_CRL_DISTRIBUTION_POINTS, cdps,
 					BUILD_OCSP_ACCESS_LOCATIONS, ocsp,
 					BUILD_PERMITTED_NAME_CONSTRAINTS, permitted,
@@ -529,6 +558,7 @@ static int issue()
 					BUILD_POLICY_REQUIRE_EXPLICIT, require_explicit,
 					BUILD_POLICY_INHIBIT_MAPPING, inhibit_mapping,
 					BUILD_POLICY_INHIBIT_ANY, inhibit_any,
+					BUILD_SIGNATURE_SCHEME, scheme,
 					BUILD_END);
 	if (!cert)
 	{
@@ -557,10 +587,12 @@ end:
 	san->destroy_offset(san, offsetof(identification_t, destroy));
 	permitted->destroy_offset(permitted, offsetof(identification_t, destroy));
 	excluded->destroy_offset(excluded, offsetof(identification_t, destroy));
+	addrblocks->destroy_offset(addrblocks, offsetof(traffic_selector_t, destroy));
 	policies->destroy_function(policies, (void*)destroy_cert_policy);
 	mappings->destroy_function(mappings, (void*)destroy_policy_mapping);
 	cdps->destroy_function(cdps, (void*)destroy_cdp);
 	ocsp->destroy(ocsp);
+	signature_params_destroy(scheme);
 	free(encoding.ptr);
 	free(serial.ptr);
 
@@ -575,6 +607,7 @@ usage:
 	san->destroy_offset(san, offsetof(identification_t, destroy));
 	permitted->destroy_offset(permitted, offsetof(identification_t, destroy));
 	excluded->destroy_offset(excluded, offsetof(identification_t, destroy));
+	addrblocks->destroy_offset(addrblocks, offsetof(traffic_selector_t, destroy));
 	policies->destroy_function(policies, (void*)destroy_cert_policy);
 	mappings->destroy_function(mappings, (void*)destroy_policy_mapping);
 	cdps->destroy_function(cdps, (void*)destroy_cdp);
@@ -599,6 +632,7 @@ static void __attribute__ ((constructor))reg()
 		 "[--policy-explicit len] [--policy-inhibit len] [--policy-any len]",
 		 "[--cert-policy oid [--cps-uri uri] [--user-notice text]]+",
 		 "[--digest md5|sha1|sha224|sha256|sha384|sha512|sha3_224|sha3_256|sha3_384|sha3_512]",
+		 "[--rsa-padding pkcs1|pss]",
 		 "[--outform der|pem]"},
 		{
 			{"help",			'h', 0, "show usage information"},
@@ -606,7 +640,7 @@ static void __attribute__ ((constructor))reg()
 			{"type",			't', 1, "type of input, default: pub"},
 			{"cacert",			'c', 1, "CA certificate file"},
 			{"cakey",			'k', 1, "CA private key file"},
-			{"cakeyid",			'x', 1, "keyid on smartcard of CA private key"},
+			{"cakeyid",			'x', 1, "smartcard or TPM CA private key object handle"},
 			{"dn",				'd', 1, "distinguished name to include as subject"},
 			{"san",				'a', 1, "subjectAltName to include in certificate"},
 			{"lifetime",		'l', 1, "days the certificate is valid, default: 1095"},
@@ -616,6 +650,7 @@ static void __attribute__ ((constructor))reg()
 			{"serial",			's', 1, "serial number in hex, default: random"},
 			{"ca",				'b', 0, "include CA basicConstraint, default: no"},
 			{"pathlen",			'p', 1, "set path length constraint"},
+			{"addrblock",		'B', 1, "RFC 3779 addrBlock to include"},
 			{"nc-permitted",	'n', 1, "add permitted NameConstraint"},
 			{"nc-excluded",		'N', 1, "add excluded NameConstraint"},
 			{"cert-policy",		'P', 1, "certificatePolicy OID to include"},
@@ -630,6 +665,7 @@ static void __attribute__ ((constructor))reg()
 			{"crlissuer",		'I', 1, "CRL Issuer for CRL at distribution point"},
 			{"ocsp",			'o', 1, "OCSP AuthorityInfoAccess URI to include"},
 			{"digest",			'g', 1, "digest for signature creation, default: key-specific"},
+			{"rsa-padding",		'R', 1, "padding for RSA signatures, default: pkcs1"},
 			{"outform",			'f', 1, "encoding of generated cert, default: der"},
 		}
 	});

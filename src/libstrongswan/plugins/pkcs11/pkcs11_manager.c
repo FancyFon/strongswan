@@ -164,18 +164,13 @@ static void handle_slot(lib_entry_t *entry, CK_SLOT_ID slot, bool hot)
 	}
 }
 
-/**
- * Dispatch slot events
- */
-static job_requeue_t dispatch_slot_events(lib_entry_t *entry)
+CALLBACK(dispatch_slot_events, job_requeue_t,
+	lib_entry_t *entry)
 {
 	CK_SLOT_ID slot;
 	CK_RV rv;
-	bool old;
 
-	old = thread_cancelability(TRUE);
 	rv = entry->lib->f->C_WaitForSlotEvent(0, &slot, NULL);
-	thread_cancelability(old);
 	if (rv == CKR_FUNCTION_NOT_SUPPORTED || rv == CKR_NO_EVENT)
 	{
 		DBG1(DBG_CFG, "module '%s' does not support hot-plugging, cancelled",
@@ -193,6 +188,16 @@ static job_requeue_t dispatch_slot_events(lib_entry_t *entry)
 	handle_slot(entry, slot, TRUE);
 
 	return JOB_REQUEUE_DIRECT;
+}
+
+CALLBACK(cancel_events, bool,
+	lib_entry_t *entry)
+{
+	/* it's possible other threads still use the API after this call, but we
+	 * have no other way to return from C_WaitForSlotEvent() if we can't cancel
+	 * the thread because libraries hold locks they don't release */
+	entry->lib->f->C_Finalize(NULL);
+	return TRUE;
 }
 
 /**
@@ -265,8 +270,13 @@ typedef struct {
 } token_enumerator_t;
 
 METHOD(enumerator_t, enumerate_token, bool,
-	token_enumerator_t *this, pkcs11_library_t **out, CK_SLOT_ID *slot)
+	token_enumerator_t *this, va_list args)
 {
+	pkcs11_library_t **out;
+	CK_SLOT_ID *slot;
+
+	VA_ARGS_VGET(args, out, slot);
+
 	if (this->current >= this->count)
 	{
 		free(this->slots);
@@ -301,7 +311,8 @@ METHOD(pkcs11_manager_t, create_token_enumerator, enumerator_t*,
 
 	INIT(enumerator,
 		.public = {
-			.enumerate = (void*)_enumerate_token,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _enumerate_token,
 			.destroy = _destroy_token,
 		},
 		.inner = this->libs->create_enumerator(this->libs),
@@ -371,8 +382,8 @@ pkcs11_manager_t *pkcs11_manager_create(pkcs11_manager_token_event_t cb,
 	{
 		query_slots(entry);
 		lib->processor->queue_job(lib->processor,
-			(job_t*)callback_job_create_with_prio((void*)dispatch_slot_events,
-						entry, NULL, (void*)return_false, JOB_PRIO_CRITICAL));
+			(job_t*)callback_job_create_with_prio(dispatch_slot_events,
+						entry, NULL, cancel_events, JOB_PRIO_CRITICAL));
 	}
 	enumerator->destroy(enumerator);
 

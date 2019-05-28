@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2014 Tobias Brunner
  * Copyright (C) 2006 Andreas Steffen
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -110,6 +110,7 @@ static const char *LST_authby[] = {
 
 static const char *LST_fragmentation[] = {
 	"no",
+	"accept",
 	"yes",
 	"force",
 	 NULL
@@ -164,6 +165,7 @@ static const token_info_t token_info[] =
 	{ ARG_TIME, offsetof(starter_conn_t, dpd_timeout), NULL                        },
 	{ ARG_ENUM, offsetof(starter_conn_t, dpd_action), LST_dpd_action               },
 	{ ARG_ENUM, offsetof(starter_conn_t, close_action), LST_dpd_action             },
+	{ ARG_ENUM, offsetof(starter_conn_t, sha256_96), LST_bool                      },
 	{ ARG_TIME, offsetof(starter_conn_t, inactivity), NULL                         },
 	{ ARG_MISC, 0, NULL  /* KW_MODECONFIG */                                       },
 	{ ARG_MISC, 0, NULL  /* KW_XAUTH */                                            },

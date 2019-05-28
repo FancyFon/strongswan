@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * Copyright (C) 2015 Andreas Steffen
  * HSR Hochschule fuer Technik Rapperswil
@@ -218,7 +218,7 @@ static void log_child_sa(FILE *out, child_sa_t *child_sa, bool all)
 			child_sa->get_name(child_sa), child_sa->get_unique_id(child_sa),
 			child_sa_state_names, child_sa->get_state(child_sa),
 			ipsec_mode_names, child_sa->get_mode(child_sa),
-			config->use_proxy_mode(config) ? "_PROXY" : "",
+			config->has_option(config, OPT_PROXY_MODE) ? "_PROXY" : "",
 			child_sa->get_reqid(child_sa));
 
 	if (child_sa->get_state(child_sa) == CHILD_INSTALLED)
@@ -580,8 +580,10 @@ METHOD(stroke_list_t, status, void,
 			children = peer_cfg->create_child_cfg_enumerator(peer_cfg);
 			while (children->enumerate(children, &child_cfg))
 			{
-				my_ts = child_cfg->get_traffic_selectors(child_cfg, TRUE, NULL, NULL);
-				other_ts = child_cfg->get_traffic_selectors(child_cfg, FALSE, NULL, NULL);
+				my_ts = child_cfg->get_traffic_selectors(child_cfg, TRUE,
+														 NULL, NULL, FALSE);
+				other_ts = child_cfg->get_traffic_selectors(child_cfg, FALSE,
+															NULL, NULL, FALSE);
 				fprintf(out, "%12s:   child:  %#R === %#R %N",
 						child_cfg->get_name(child_cfg),	my_ts, other_ts,
 						ipsec_mode_names, child_cfg->get_mode(child_cfg));
@@ -614,8 +616,10 @@ METHOD(stroke_list_t, status, void,
 			fprintf(out, "Shunted Connections:\n");
 			first = FALSE;
 		}
-		my_ts = child_cfg->get_traffic_selectors(child_cfg, TRUE, NULL, NULL);
-		other_ts = child_cfg->get_traffic_selectors(child_cfg, FALSE, NULL, NULL);
+		my_ts = child_cfg->get_traffic_selectors(child_cfg, TRUE, NULL,
+												 NULL, FALSE);
+		other_ts = child_cfg->get_traffic_selectors(child_cfg, FALSE, NULL,
+													NULL, FALSE);
 		fprintf(out, "%12s:  %#R === %#R %N\n",
 				child_cfg->get_name(child_cfg),	my_ts, other_ts,
 				ipsec_mode_names, child_cfg->get_mode(child_cfg));
@@ -693,7 +697,7 @@ METHOD(stroke_list_t, status, void,
 
 /**
  * create a unique certificate list without duplicates
- * certicates having the same issuer are grouped together.
+ * certificates having the same issuer are grouped together.
  */
 static linked_list_t* create_unique_cert_list(certificate_type_t type)
 {
@@ -958,8 +962,7 @@ static void list_plugins(FILE *out)
 				{
 					case FEATURE_PROVIDE:
 						fp = &features[i];
-						loaded = list->find_first(list, NULL,
-												  (void**)&fp) == SUCCESS;
+						loaded = list->find_first(list, NULL, (void**)&fp);
 						fprintf(out, "    %s%s\n",
 								str, loaded ? "" : " (not loaded)");
 						break;
@@ -1056,7 +1059,7 @@ static void pool_leases(private_stroke_list_t *this, FILE *out, char *pool,
 	fprintf(out, "Leases in pool '%s', usage: %u/%u, %u online\n",
 			pool, online + offline, size, online);
 	enumerator = this->attribute->create_lease_enumerator(this->attribute, pool);
-	while (enumerator && enumerator->enumerate(enumerator, &id, &lease, &on))
+	while (enumerator->enumerate(enumerator, &id, &lease, &on))
 	{
 		if (!address || address->ip_equals(address, lease))
 		{

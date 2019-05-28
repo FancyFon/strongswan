@@ -390,6 +390,12 @@ METHOD(tpm_tss_t, get_public, chunk_t,
 	return aik_pubkey;
 }
 
+METHOD(tpm_tss_t, supported_signature_schemes, enumerator_t*,
+	private_tpm_tss_trousers_t *this, uint32_t handle)
+{
+	return enumerator_create_empty();
+}
+
 METHOD(tpm_tss_t, read_pcr, bool,
 	private_tpm_tss_trousers_t *this, uint32_t pcr_num, chunk_t *pcr_value,
 	hash_algorithm_t alg)
@@ -584,7 +590,21 @@ err1:
 
 METHOD(tpm_tss_t, sign, bool,
 	private_tpm_tss_trousers_t *this, uint32_t hierarchy, uint32_t handle,
-	signature_scheme_t scheme, chunk_t data, chunk_t pin, chunk_t *signature)
+	signature_scheme_t scheme, void *params, chunk_t data, chunk_t pin,
+	chunk_t *signature)
+{
+	return FALSE;
+}
+
+METHOD(tpm_tss_t, get_random, bool,
+	private_tpm_tss_trousers_t *this, size_t bytes, uint8_t *buffer)
+{
+	return FALSE;
+}
+
+METHOD(tpm_tss_t, get_data, bool,
+	private_tpm_tss_trousers_t *this, uint32_t hierarchy, uint32_t handle,
+	chunk_t pin, chunk_t *data)
 {
 	return FALSE;
 }
@@ -628,10 +648,13 @@ tpm_tss_t *tpm_tss_trousers_create()
 				.get_version_info = _get_version_info,
 				.generate_aik = _generate_aik,
 				.get_public = _get_public,
+				.supported_signature_schemes = _supported_signature_schemes,
 				.read_pcr = _read_pcr,
 				.extend_pcr = _extend_pcr,
 				.quote = _quote,
 				.sign = _sign,
+				.get_random = _get_random,
+				.get_data = _get_data,
 				.destroy = _destroy,
 			},
 			.load_aik = _load_aik,

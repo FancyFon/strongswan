@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2015 Tobias Brunner
  * Copyright (C) 2006 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -302,6 +302,7 @@ struct stroke_msg_t {
 			} mark_in, mark_out;
 			stroke_end_t me, other;
 			uint32_t replay_window;
+			bool sha256_96;
 		} add_conn;
 
 		/* data for STR_ADD_CA */

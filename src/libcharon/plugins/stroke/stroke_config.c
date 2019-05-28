@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2012-2014 Tobias Brunner
  * Copyright (C) 2008 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -68,13 +68,20 @@ METHOD(backend_t, create_peer_cfg_enumerator, enumerator_t*,
 									 (void*)this->mutex->unlock, this->mutex);
 }
 
-/**
- * filter function for ike configs
- */
-static bool ike_filter(void *data, peer_cfg_t **in, ike_cfg_t **out)
+CALLBACK(ike_filter, bool,
+	void *data, enumerator_t *orig, va_list args)
 {
-	*out = (*in)->get_ike_cfg(*in);
-	return TRUE;
+	peer_cfg_t *cfg;
+	ike_cfg_t **out;
+
+	VA_ARGS_VGET(args, out);
+
+	if (orig->enumerate(orig, &cfg))
+	{
+		*out = cfg->get_ike_cfg(cfg);
+		return TRUE;
+	}
+	return FALSE;
 }
 
 METHOD(backend_t, create_ike_cfg_enumerator, enumerator_t*,
@@ -82,7 +89,7 @@ METHOD(backend_t, create_ike_cfg_enumerator, enumerator_t*,
 {
 	this->mutex->lock(this->mutex);
 	return enumerator_create_filter(this->list->create_enumerator(this->list),
-									(void*)ike_filter, this->mutex,
+									ike_filter, this->mutex,
 									(void*)this->mutex->unlock);
 }
 
@@ -129,7 +136,7 @@ METHOD(backend_t, get_peer_cfg_by_name, peer_cfg_t*,
 /**
  * parse a proposal string, either into ike_cfg or child_cfg
  */
-static void add_proposals(private_stroke_config_t *this, char *string,
+static bool add_proposals(private_stroke_config_t *this, char *string,
 				ike_cfg_t *ike_cfg, child_cfg_t *child_cfg, protocol_id_t proto)
 {
 	if (string)
@@ -163,10 +170,11 @@ static void add_proposals(private_stroke_config_t *this, char *string,
 				continue;
 			}
 			DBG1(DBG_CFG, "skipped invalid proposal string: %s", single);
+			return FALSE;
 		}
 		if (strict)
 		{
-			return;
+			return TRUE;
 		}
 		/* add default porposal to the end if not strict */
 	}
@@ -180,6 +188,7 @@ static void add_proposals(private_stroke_config_t *this, char *string,
 		child_cfg->add_proposal(child_cfg, proposal_create_default(proto));
 		child_cfg->add_proposal(child_cfg, proposal_create_default_aead(proto));
 	}
+	return TRUE;
 }
 
 /**
@@ -282,7 +291,12 @@ static ike_cfg_t *build_ike_cfg(private_stroke_config_t *this, stroke_msg_t *msg
 							 msg->add_conn.fragmentation,
 							 msg->add_conn.ikedscp);
 
-	add_proposals(this, msg->add_conn.algorithms.ike, ike_cfg, NULL, PROTO_IKE);
+	if (!add_proposals(this, msg->add_conn.algorithms.ike, ike_cfg,
+					   NULL, PROTO_IKE))
+	{
+		ike_cfg->destroy(ike_cfg);
+		return NULL;
+	}
 	return ike_cfg;
 }
 
@@ -505,7 +519,7 @@ static auth_cfg_t *build_auth_cfg(private_stroke_config_t *this,
 		enumerator->destroy(enumerator);
 	}
 
-	/* authentication metod (class, actually) */
+	/* authentication method (class, actually) */
 	if (strpfx(auth, "ike:") ||
 		strpfx(auth, "pubkey") ||
 		strpfx(auth, "rsa") ||
@@ -1043,6 +1057,7 @@ static child_cfg_t *build_child_cfg(private_stroke_config_t *this,
 									stroke_msg_t *msg)
 {
 	child_cfg_t *child_cfg;
+	bool success;
 	child_cfg_create_t child = {
 		.lifetime = {
 			.time = {
@@ -1071,15 +1086,16 @@ static child_cfg_t *build_child_cfg(private_stroke_config_t *this,
 		},
 		.reqid = msg->add_conn.reqid,
 		.mode = msg->add_conn.mode,
-		.proxy_mode = msg->add_conn.proxy_mode,
-		.ipcomp = msg->add_conn.ipcomp,
+		.options = (msg->add_conn.proxy_mode ? OPT_PROXY_MODE : 0) |
+				   (msg->add_conn.ipcomp ? OPT_IPCOMP : 0) |
+				   (msg->add_conn.me.hostaccess ? OPT_HOSTACCESS : 0) |
+				   (msg->add_conn.install_policy ? 0 : OPT_NO_POLICIES) |
+				   (msg->add_conn.sha256_96 ? OPT_SHA256_96 : 0),
 		.tfc = msg->add_conn.tfc,
 		.inactivity = msg->add_conn.inactivity,
 		.dpd_action = map_action(msg->add_conn.dpd.action),
 		.close_action = map_action(msg->add_conn.close_action),
 		.updown = msg->add_conn.me.updown,
-		.hostaccess = msg->add_conn.me.hostaccess,
-		.suppress_policies = !msg->add_conn.install_policy,
 	};
 
 	child_cfg = child_cfg_create(msg->add_conn.name, &child);
@@ -1092,13 +1108,18 @@ static child_cfg_t *build_child_cfg(private_stroke_config_t *this,
 
 	if (msg->add_conn.algorithms.ah)
 	{
-		add_proposals(this, msg->add_conn.algorithms.ah,
-					  NULL, child_cfg, PROTO_AH);
+		success = add_proposals(this, msg->add_conn.algorithms.ah,
+								NULL, child_cfg, PROTO_AH);
 	}
 	else
 	{
-		add_proposals(this, msg->add_conn.algorithms.esp,
-					  NULL, child_cfg, PROTO_ESP);
+		success = add_proposals(this, msg->add_conn.algorithms.esp,
+								NULL, child_cfg, PROTO_ESP);
+	}
+	if (!success)
+	{
+		child_cfg->destroy(child_cfg);
+		return NULL;
 	}
 	return child_cfg;
 }

@@ -55,8 +55,9 @@ static bool add_file_key_value(vici_req_t *req, char *key, char *value)
 	else
 	{
 		path = buf;
-		snprintf(path, PATH_MAX, "%s%s%s",
-				 SWANCTL_X509CADIR, DIRECTORY_SEPARATOR, value);
+		snprintf(path, PATH_MAX, "%s%s%s%s%s", swanctl_dir,
+				 DIRECTORY_SEPARATOR, SWANCTL_X509CADIR,
+				 DIRECTORY_SEPARATOR, value);
 	}
 	map = chunk_map(path, FALSE);
 
@@ -75,15 +76,14 @@ static bool add_file_key_value(vici_req_t *req, char *key, char *value)
 }
 
 /**
- * Translate sletting key/values from a section into vici key-values/lists
+ * Translate sletting key/values from a section enumerator into vici
+ * key-values/lists. Destroys the enumerator.
  */
-static bool add_key_values(vici_req_t *req, settings_t *cfg, char *section)
+static bool add_key_values(vici_req_t *req, enumerator_t *enumerator)
 {
-	enumerator_t *enumerator;
 	char *key, *value;
 	bool ret = TRUE;
 
-	enumerator = cfg->create_key_value_enumerator(cfg, section);
 	while (enumerator->enumerate(enumerator, &key, &value))
 	{
 		if (streq(key, "cacert"))
@@ -115,17 +115,17 @@ static bool add_key_values(vici_req_t *req, settings_t *cfg, char *section)
 static bool load_authority(vici_conn_t *conn, settings_t *cfg,
 						   char *section, command_format_options_t format)
 {
+	enumerator_t *enumerator;
 	vici_req_t *req;
 	vici_res_t *res;
 	bool ret = TRUE;
-	char buf[128];
-
-	snprintf(buf, sizeof(buf), "%s.%s", "authorities", section);
 
 	req = vici_begin("load-authority");
 
 	vici_begin_section(req, section);
-	if (!add_key_values(req, cfg, buf))
+	enumerator = cfg->create_key_value_enumerator(cfg, "authorities.%s",
+												  section);
+	if (!add_key_values(req, enumerator))
 	{
 		vici_free_req(req);
 		return FALSE;
@@ -310,7 +310,7 @@ static int load_authorities(vici_conn_t *conn)
 {
 	command_format_options_t format = COMMAND_FORMAT_NONE;
 	settings_t *cfg;
-	char *arg;
+	char *arg, *file = NULL;
 	int ret;
 
 	while (TRUE)
@@ -325,6 +325,9 @@ static int load_authorities(vici_conn_t *conn)
 			case 'r':
 				format |= COMMAND_FORMAT_RAW;
 				continue;
+			case 'f':
+				file = arg;
+				continue;
 			case EOF:
 				break;
 			default:
@@ -333,10 +336,9 @@ static int load_authorities(vici_conn_t *conn)
 		break;
 	}
 
-	cfg = settings_create(SWANCTL_CONF);
+	cfg = load_swanctl_conf(file);
 	if (!cfg)
 	{
-		fprintf(stderr, "parsing '%s' failed\n", SWANCTL_CONF);
 		return EINVAL;
 	}
 
@@ -360,6 +362,7 @@ static void __attribute__ ((constructor))reg()
 			{"help",		'h', 0, "show usage information"},
 			{"raw",			'r', 0, "dump raw response message"},
 			{"pretty",		'P', 0, "dump raw response message in pretty print"},
+			{"file",		'f', 1, "custom path to swanctl.conf"},
 		}
 	});
 }

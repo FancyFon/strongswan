@@ -2,7 +2,7 @@
  * Copyright (C) 2005-2010 Martin Willi
  * Copyright (C) 2010 revosec AG
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -190,8 +190,12 @@ struct keyid_enumerator_t  {
 };
 
 METHOD(enumerator_t, keyid_enumerate, bool,
-	keyid_enumerator_t *this, chunk_t *chunk)
+	keyid_enumerator_t *this, va_list args)
 {
+	chunk_t *chunk;
+
+	VA_ARGS_VGET(args, chunk);
+
 	if (this->pos == NULL)
 	{
 		this->pos = this->full.ptr;
@@ -224,7 +228,8 @@ METHOD(certreq_payload_t, create_keyid_enumerator, enumerator_t*,
 	}
 	INIT(enumerator,
 		.public = {
-			.enumerate = (void*)_keyid_enumerate,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _keyid_enumerate,
 			.destroy = (void*)free,
 		},
 		.full = this->data,

@@ -150,7 +150,7 @@ static bool manage_dns(private_osx_attr_handler_t *this,
 		if (add)
 		{
 			if (!this->append && !this->original)
-			{	/* backup orignal config, start with empty set */
+			{	/* backup original config, start with empty set */
 				this->original = arr;
 				arr = CFArrayCreateMutable(NULL, 0, &kCFTypeArrayCallBacks);
 			}
@@ -218,12 +218,15 @@ METHOD(attribute_handler_t, release, void,
 }
 
 METHOD(enumerator_t, enumerate_dns, bool,
-	enumerator_t *this, configuration_attribute_type_t *type, chunk_t *data)
+	enumerator_t *this, va_list args)
 {
+	configuration_attribute_type_t *type;
+	chunk_t *data;
+
+	VA_ARGS_VGET(args, type, data);
 	*type = INTERNAL_IP4_DNS;
 	*data = chunk_empty;
-	/* stop enumeration */
-	this->enumerate = (void*)return_false;
+	this->venumerate = (void*)return_false;
 	return TRUE;
 }
 
@@ -234,7 +237,8 @@ METHOD(attribute_handler_t, create_attribute_enumerator, enumerator_t *,
 	enumerator_t *enumerator;
 
 	INIT(enumerator,
-		.enumerate = (void*)_enumerate_dns,
+		.enumerate = enumerator_enumerate_default,
+		.venumerate = _enumerate_dns,
 		.destroy = (void*)free,
 	);
 	return enumerator;

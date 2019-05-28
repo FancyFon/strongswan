@@ -1,8 +1,8 @@
 /*
- * Copyright (C) 2012-2017 Tobias Brunner
+ * Copyright (C) 2012-2018 Tobias Brunner
  * Copyright (C) 2005-2007 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -31,7 +31,7 @@ typedef struct ike_cfg_t ike_cfg_t;
 #include <networking/host.h>
 #include <collections/linked_list.h>
 #include <utils/identification.h>
-#include <config/proposal.h>
+#include <crypto/proposal/proposal.h>
 #include <crypto/diffie_hellman.h>
 
 /**
@@ -47,19 +47,21 @@ enum ike_version_t {
 };
 
 /**
- * Proprietary IKEv1 fragmentation
+ * Proprietary IKEv1 fragmentation and IKEv2 fragmentation
  */
 enum fragmentation_t {
 	/** disable fragmentation */
 	FRAGMENTATION_NO,
-	/** enable fragmentation if supported by peer */
+	/** announce support, but don't send any fragments */
+	FRAGMENTATION_ACCEPT,
+	/** enable fragmentation, if supported by peer */
 	FRAGMENTATION_YES,
-	/** force use of fragmentation (even for the first message) */
+	/** force use of fragmentation (even for the first message for IKEv1) */
 	FRAGMENTATION_FORCE,
 };
 
 /**
- * enum strings fro ike_version_t
+ * enum strings for ike_version_t
  */
 extern enum_name_t *ike_version_names;
 
@@ -176,6 +178,15 @@ struct ike_cfg_t {
 	 */
 	proposal_t *(*select_proposal) (ike_cfg_t *this, linked_list_t *proposals,
 									bool private, bool prefer_self);
+
+	/**
+	 * Check if the config has a matching proposal.
+	 *
+	 * @param match			proposal to check
+	 * @param private		accept algorithms from a private range
+	 * @return				TRUE if a matching proposal is contained
+	 */
+	bool(*has_proposal)(ike_cfg_t *this, proposal_t *match, bool private);
 
 	/**
 	 * Should we send a certificate request in IKE_SA_INIT?

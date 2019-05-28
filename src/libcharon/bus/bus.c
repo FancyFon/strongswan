@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2011-2016 Tobias Brunner
  * Copyright (C) 2006 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -207,20 +207,20 @@ static inline void register_logger(private_bus_t *this, debug_t group,
 	}
 }
 
-/**
- * Find the log level of the first registered logger that implements log or
- * vlog (or both).
- */
-static bool find_max_levels(log_entry_t *entry, debug_t *group, level_t *level,
-							level_t *vlevel)
+CALLBACK(find_max_levels, bool,
+	log_entry_t *entry, va_list args)
 {
+	level_t *level, *vlevel;
+	debug_t group;
+
+	VA_ARGS_VGET(args, group, level, vlevel);
 	if (entry->logger->log && *level == LEVEL_SILENT)
 	{
-		*level = entry->levels[*group];
+		*level = entry->levels[group];
 	}
 	if (entry->logger->vlog && *vlevel == LEVEL_SILENT)
 	{
-		*vlevel = entry->levels[*group];
+		*vlevel = entry->levels[group];
 	}
 	return *level > LEVEL_SILENT && *vlevel > LEVEL_SILENT;
 }
@@ -258,8 +258,8 @@ static inline void unregister_logger(private_bus_t *this, logger_t *logger)
 
 				loggers = this->loggers[group];
 				loggers->remove(loggers, found, NULL);
-				loggers->find_first(loggers, (linked_list_match_t)find_max_levels,
-									NULL, &group, &level, &vlevel);
+				loggers->find_first(loggers, find_max_levels, NULL, group,
+									&level, &vlevel);
 				set_level(&this->max_level[group], level);
 				set_level(&this->max_vlevel[group], vlevel);
 			}
@@ -330,11 +330,12 @@ typedef struct {
 	va_list args;
 } log_data_t;
 
-/**
- * logger->log() invocation as a invoke_function callback
- */
-static void log_cb(log_entry_t *entry, log_data_t *data)
+CALLBACK(log_cb, void,
+	log_entry_t *entry, va_list args)
 {
+	log_data_t *data;
+
+	VA_ARGS_VGET(args, data);
 	if (entry->logger->log && entry->levels[data->group] >= data->level)
 	{
 		entry->logger->log(entry->logger, data->group, data->level,
@@ -342,11 +343,12 @@ static void log_cb(log_entry_t *entry, log_data_t *data)
 	}
 }
 
-/**
- * logger->vlog() invocation as a invoke_function callback
- */
-static void vlog_cb(log_entry_t *entry, log_data_t *data)
+CALLBACK(vlog_cb, void,
+	log_entry_t *entry, va_list args)
 {
+	log_data_t *data;
+
+	VA_ARGS_VGET(args, data);
 	if (entry->logger->vlog && entry->levels[data->group] >= data->level)
 	{
 		va_list copy;
@@ -405,8 +407,7 @@ METHOD(bus_t, vlog, void,
 		}
 		if (len > 0)
 		{
-			loggers->invoke_function(loggers, (linked_list_invoke_t)log_cb,
-									 &data);
+			loggers->invoke_function(loggers, log_cb, &data);
 		}
 		if (data.message != buf)
 		{
@@ -422,7 +423,7 @@ METHOD(bus_t, vlog, void,
 		data.message = format;
 
 		va_copy(data.args, args);
-		loggers->invoke_function(loggers, (linked_list_invoke_t)vlog_cb, &data);
+		loggers->invoke_function(loggers, vlog_cb, &data);
 		va_end(data.args);
 	}
 
@@ -574,7 +575,7 @@ METHOD(bus_t, message, void,
 METHOD(bus_t, ike_keys, void,
 	private_bus_t *this, ike_sa_t *ike_sa, diffie_hellman_t *dh,
 	chunk_t dh_other, chunk_t nonce_i, chunk_t nonce_r,
-	ike_sa_t *rekey, shared_key_t *shared)
+	ike_sa_t *rekey, shared_key_t *shared, auth_method_t method)
 {
 	enumerator_t *enumerator;
 	entry_t *entry;
@@ -590,7 +591,8 @@ METHOD(bus_t, ike_keys, void,
 		}
 		entry->calling++;
 		keep = entry->listener->ike_keys(entry->listener, ike_sa, dh, dh_other,
-										 nonce_i, nonce_r, rekey, shared);
+										 nonce_i, nonce_r, rekey, shared,
+										 method);
 		entry->calling--;
 		if (!keep)
 		{
@@ -826,7 +828,11 @@ METHOD(bus_t, ike_updown, void,
 		enumerator = ike_sa->create_child_sa_enumerator(ike_sa);
 		while (enumerator->enumerate(enumerator, (void**)&child_sa))
 		{
-			child_updown(this, child_sa, FALSE);
+			if (child_sa->get_state(child_sa) != CHILD_REKEYED &&
+				child_sa->get_state(child_sa) != CHILD_DELETED)
+			{
+				child_updown(this, child_sa, FALSE);
+			}
 		}
 		enumerator->destroy(enumerator);
 	}

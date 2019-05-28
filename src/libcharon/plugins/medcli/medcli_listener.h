@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008 Martin Willi
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -37,7 +37,7 @@ struct medcli_listener_t {
 	listener_t listener;
 
 	/**
-	 * Destroy the credentials databse.
+	 * Destroy the credentials database.
 	 */
 	void (*destroy)(medcli_listener_t *this);
 };

@@ -2,10 +2,10 @@
  * Copyright (C) 2000 Andreas Hess, Patric Lichtsteiner, Roger Wegmann
  * Copyright (C) 2001 Marco Bertossa, Andreas Schleiss
  * Copyright (C) 2002 Mario Strasser
- * Copyright (C) 2000-2006 Andreas Steffen
+ * Copyright (C) 2000-2017 Andreas Steffen
  * Copyright (C) 2006-2009 Martin Willi
- * Copyright (C) 2008 Tobias Brunner
- * Hochschule fuer Technik Rapperswil
+ * Copyright (C) 2008-2017 Tobias Brunner
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -197,9 +197,9 @@ struct private_x509_cert_t {
 	x509_flag_t flags;
 
 	/**
-	 * Signature algorithm
+	 * Signature scheme
 	 */
-	int algorithm;
+	signature_params_t *scheme;
 
 	/**
 	 * Signature
@@ -218,13 +218,26 @@ struct private_x509_cert_t {
 };
 
 /**
- * Destroy a CertificateDistributionPoint
+ * Convert a generalName to a string
  */
-static void crl_uri_destroy(x509_cdp_t *this)
+static bool gn_to_string(identification_t *id, char **uri)
 {
-	free(this->uri);
-	DESTROY_IF(this->issuer);
-	free(this);
+	int len;
+
+#ifdef USE_FUZZING
+	chunk_t proper;
+	chunk_printable(id->get_encoding(id), &proper, '?');
+	len = asprintf(uri, "%.*s", (int)proper.len, proper.ptr);
+	chunk_free(&proper);
+#else
+	len = asprintf(uri, "%Y", id);
+#endif
+	if (!len)
+	{
+		free(*uri);
+		return FALSE;
+	}
+	return len > 0;
 }
 
 /**
@@ -280,13 +293,14 @@ static const asn1Object_t basicConstraintsObjects[] = {
 /**
  * Extracts the basicConstraints extension
  */
-static void parse_basicConstraints(chunk_t blob, int level0,
+static bool parse_basicConstraints(chunk_t blob, int level0,
 								   private_x509_cert_t *this)
 {
 	asn1_parser_t *parser;
 	chunk_t object;
 	int objectID;
 	bool isCA = FALSE;
+	bool success;
 
 	parser = asn1_parser_create(basicConstraintsObjects, blob);
 	parser->set_top_level(parser, level0);
@@ -313,7 +327,10 @@ static void parse_basicConstraints(chunk_t blob, int level0,
 				break;
 		}
 	}
+	success = parser->success(parser);
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
@@ -352,8 +369,13 @@ static bool parse_otherName(chunk_t *blob, int level0, id_type_t *type)
 				switch (oid)
 				{
 					case OID_XMPP_ADDR:
-						if (!asn1_parse_simple_object(&object, ASN1_UTF8STRING,
+						if (asn1_parse_simple_object(&object, ASN1_UTF8STRING,
 									parser->get_level(parser)+1, "xmppAddr"))
+						{	/* we handle xmppAddr as RFC822 addr */
+							*blob = object;
+							*type = ID_RFC822_ADDR;
+						}
+						else
 						{
 							goto end;
 						}
@@ -502,11 +524,14 @@ static const asn1Object_t generalNamesObjects[] = {
 /**
  * Extracts one or several GNs and puts them into a chained list
  */
-void x509_parse_generalNames(chunk_t blob, int level0, bool implicit, linked_list_t *list)
+bool x509_parse_generalNames(chunk_t blob, int level0, bool implicit,
+							 linked_list_t *list)
 {
 	asn1_parser_t *parser;
 	chunk_t object;
+	identification_t *gn;
 	int objectID;
+	bool success = FALSE;
 
 	parser = asn1_parser_create(generalNamesObjects, blob);
 	parser->set_top_level(parser, level0);
@@ -516,16 +541,20 @@ void x509_parse_generalNames(chunk_t blob, int level0, bool implicit, linked_lis
 	{
 		if (objectID == GENERAL_NAMES_GN)
 		{
-			identification_t *gn = parse_generalName(object,
-											parser->get_level(parser)+1);
-
-			if (gn)
+			gn = parse_generalName(object, parser->get_level(parser)+1);
+			if (!gn)
 			{
-				list->insert_last(list, (void *)gn);
+				goto end;
 			}
+			list->insert_last(list, (void *)gn);
 		}
 	}
+	success = parser->success(parser);
+
+end:
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
@@ -579,6 +608,7 @@ chunk_t x509_parse_authorityKeyIdentifier(chunk_t blob, int level0,
 		}
 	}
 	parser->destroy(parser);
+
 	return authKeyIdentifier;
 }
 
@@ -599,13 +629,14 @@ static const asn1Object_t authInfoAccessObjects[] = {
 /**
  * Extracts an authorityInfoAcess location
  */
-static void parse_authorityInfoAccess(chunk_t blob, int level0,
+static bool parse_authorityInfoAccess(chunk_t blob, int level0,
 									  private_x509_cert_t *this)
 {
 	asn1_parser_t *parser;
 	chunk_t object;
 	int objectID;
 	int accessMethod = OID_UNKNOWN;
+	bool success = FALSE;
 
 	parser = asn1_parser_create(authInfoAccessObjects, blob);
 	parser->set_top_level(parser, level0);
@@ -636,7 +667,7 @@ static void parse_authorityInfoAccess(chunk_t blob, int level0,
 							}
 							DBG2(DBG_ASN, "  '%Y'", id);
 							if (accessMethod == OID_OCSP &&
-								asprintf(&uri, "%Y", id) > 0)
+								gn_to_string(id, &uri))
 							{
 								this->ocsp_uris->insert_last(this->ocsp_uris, uri);
 							}
@@ -653,9 +684,12 @@ static void parse_authorityInfoAccess(chunk_t blob, int level0,
 				break;
 		}
 	}
+	success = parser->success(parser);
 
 end:
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
@@ -674,6 +708,9 @@ static void parse_keyUsage(chunk_t blob, private_x509_cert_t *this)
 		KU_ENCIPHER_ONLY =		7,
 		KU_DECIPHER_ONLY =		8,
 	};
+
+	/* to be compliant with RFC 4945 specific KUs have to be included */
+	this->flags &= ~X509_IKE_COMPLIANT;
 
 	if (asn1_unwrap(&blob, &blob) == ASN1_BIT_STRING && blob.len)
 	{
@@ -695,10 +732,12 @@ static void parse_keyUsage(chunk_t blob, private_x509_cert_t *this)
 						case KU_CRL_SIGN:
 							this->flags |= X509_CRL_SIGN;
 							break;
-						case KU_KEY_CERT_SIGN:
-							/* we use the caBasicConstraint, MUST be set */
 						case KU_DIGITAL_SIGNATURE:
 						case KU_NON_REPUDIATION:
+							this->flags |= X509_IKE_COMPLIANT;
+							break;
+						case KU_KEY_CERT_SIGN:
+							/* we use the caBasicConstraint, MUST be set */
 						case KU_KEY_ENCIPHERMENT:
 						case KU_DATA_ENCIPHERMENT:
 						case KU_KEY_AGREEMENT:
@@ -726,12 +765,13 @@ static const asn1Object_t extendedKeyUsageObjects[] = {
 /**
  * Extracts extendedKeyUsage OIDs
  */
-static void parse_extendedKeyUsage(chunk_t blob, int level0,
+static bool parse_extendedKeyUsage(chunk_t blob, int level0,
 								   private_x509_cert_t *this)
 {
 	asn1_parser_t *parser;
 	chunk_t object;
 	int objectID;
+	bool success;
 
 	parser = asn1_parser_create(extendedKeyUsageObjects, blob);
 	parser->set_top_level(parser, level0);
@@ -762,27 +802,30 @@ static void parse_extendedKeyUsage(chunk_t blob, int level0,
 			}
 		}
 	}
+	success = parser->success(parser);
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
  * ASN.1 definition of crlDistributionPoints
  */
 static const asn1Object_t crlDistributionPointsObjects[] = {
-	{ 0, "crlDistributionPoints",	ASN1_SEQUENCE,		ASN1_LOOP			}, /*  0 */
-	{ 1,   "DistributionPoint",		ASN1_SEQUENCE,		ASN1_NONE			}, /*  1 */
-	{ 2,     "distributionPoint",	ASN1_CONTEXT_C_0,	ASN1_OPT|ASN1_LOOP	}, /*  2 */
-	{ 3,       "fullName",			ASN1_CONTEXT_C_0,	ASN1_OPT|ASN1_OBJ	}, /*  3 */
-	{ 3,       "end choice",		ASN1_EOC,			ASN1_END			}, /*  4 */
-	{ 3,       "nameRelToCRLIssuer",ASN1_CONTEXT_C_1,	ASN1_OPT|ASN1_BODY	}, /*  5 */
-	{ 3,       "end choice",		ASN1_EOC,			ASN1_END			}, /*  6 */
-	{ 2,     "end opt",				ASN1_EOC,			ASN1_END			}, /*  7 */
-	{ 2,     "reasons",				ASN1_CONTEXT_C_1,	ASN1_OPT|ASN1_BODY	}, /*  8 */
-	{ 2,     "end opt",				ASN1_EOC,			ASN1_END			}, /*  9 */
-	{ 2,     "crlIssuer",			ASN1_CONTEXT_C_2,	ASN1_OPT|ASN1_OBJ	}, /* 10 */
-	{ 2,     "end opt",				ASN1_EOC,			ASN1_END			}, /* 11 */
-	{ 0, "end loop",				ASN1_EOC,			ASN1_END			}, /* 12 */
-	{ 0, "exit",					ASN1_EOC,			ASN1_EXIT			}
+	{ 0, "crlDistributionPoints",   ASN1_SEQUENCE,    ASN1_LOOP            }, /*  0 */
+	{ 1,   "DistributionPoint",     ASN1_SEQUENCE,    ASN1_NONE            }, /*  1 */
+	{ 2,     "distributionPoint",   ASN1_CONTEXT_C_0, ASN1_OPT|ASN1_CHOICE }, /*  2 */
+	{ 3,       "fullName",          ASN1_CONTEXT_C_0, ASN1_OPT|ASN1_OBJ    }, /*  3 */
+	{ 3,       "end choice",        ASN1_EOC,         ASN1_END|ASN1_CH     }, /*  4 */
+	{ 3,       "nameRelToCRLIssuer",ASN1_CONTEXT_C_1, ASN1_OPT|ASN1_BODY   }, /*  5 */
+	{ 3,       "end choice",        ASN1_EOC,         ASN1_END|ASN1_CH     }, /*  6 */
+	{ 2,     "end opt/choices",     ASN1_EOC,         ASN1_END|ASN1_CHOICE }, /*  7 */
+	{ 2,     "reasons",             ASN1_CONTEXT_C_1, ASN1_OPT|ASN1_BODY   }, /*  8 */
+	{ 2,     "end opt",             ASN1_EOC,         ASN1_END             }, /*  9 */
+	{ 2,     "crlIssuer",           ASN1_CONTEXT_C_2, ASN1_OPT|ASN1_OBJ    }, /* 10 */
+	{ 2,     "end opt",             ASN1_EOC,         ASN1_END             }, /* 11 */
+	{ 0, "end loop",                ASN1_EOC,         ASN1_END             }, /* 12 */
+	{ 0, "exit",                    ASN1_EOC,         ASN1_EXIT            }
 };
 #define CRL_DIST_POINTS				 1
 #define CRL_DIST_POINTS_FULLNAME	 3
@@ -801,7 +844,7 @@ static void add_cdps(linked_list_t *list, linked_list_t *uris,
 
 	while (uris->remove_last(uris, (void**)&id) == SUCCESS)
 	{
-		if (asprintf(&uri, "%Y", id) > 0)
+		if (gn_to_string(id, &uri))
 		{
 			if (issuers->get_count(issuers))
 			{
@@ -836,13 +879,14 @@ static void add_cdps(linked_list_t *list, linked_list_t *uris,
 /**
  * Extracts one or several crlDistributionPoints into a list
  */
-void x509_parse_crlDistributionPoints(chunk_t blob, int level0,
+bool x509_parse_crlDistributionPoints(chunk_t blob, int level0,
 									  linked_list_t *list)
 {
 	linked_list_t *uris, *issuers;
 	asn1_parser_t *parser;
 	chunk_t object;
 	int objectID;
+	bool success = FALSE;
 
 	uris = linked_list_create();
 	issuers = linked_list_create();
@@ -857,37 +901,45 @@ void x509_parse_crlDistributionPoints(chunk_t blob, int level0,
 				add_cdps(list, uris, issuers);
 				break;
 			case CRL_DIST_POINTS_FULLNAME:
-				x509_parse_generalNames(object, parser->get_level(parser) + 1,
-										TRUE, uris);
+				if (!x509_parse_generalNames(object,
+								parser->get_level(parser) + 1, TRUE, uris))
+				{
+					goto end;
+				}
 				break;
 			case CRL_DIST_POINTS_ISSUER:
-				x509_parse_generalNames(object, parser->get_level(parser) + 1,
-										TRUE, issuers);
+				if (!x509_parse_generalNames(object,
+								parser->get_level(parser) + 1, TRUE, issuers))
+				{
+					goto end;
+				}
 				break;
 			default:
 				break;
 		}
 	}
-	parser->destroy(parser);
-
+	success = parser->success(parser);
 	add_cdps(list, uris, issuers);
 
-	uris->destroy(uris);
-	issuers->destroy(issuers);
+end:
+	parser->destroy(parser);
+	uris->destroy_offset(uris, offsetof(identification_t, destroy));
+	issuers->destroy_offset(issuers, offsetof(identification_t, destroy));
+
+	return success;
 }
 
 /**
  * ASN.1 definition of nameConstraints
  */
 static const asn1Object_t nameConstraintsObjects[] = {
-	{ 0, "nameConstraints",			ASN1_SEQUENCE,		ASN1_LOOP			}, /*  0 */
+	{ 0, "nameConstraints",			ASN1_SEQUENCE,		ASN1_NONE			}, /*  0 */
 	{ 1,   "permittedSubtrees",		ASN1_CONTEXT_C_0,	ASN1_OPT|ASN1_LOOP	}, /*  1 */
 	{ 2,     "generalSubtree",		ASN1_SEQUENCE,		ASN1_BODY			}, /*  2 */
 	{ 1,   "end loop",				ASN1_EOC,			ASN1_END			}, /*  3 */
 	{ 1,   "excludedSubtrees",		ASN1_CONTEXT_C_1,	ASN1_OPT|ASN1_LOOP	}, /*  4 */
 	{ 2,     "generalSubtree",		ASN1_SEQUENCE,		ASN1_BODY			}, /*  5 */
 	{ 1,   "end loop",				ASN1_EOC,			ASN1_END			}, /*  6 */
-	{ 0, "end loop",				ASN1_EOC,			ASN1_END			}, /*  7 */
 	{ 0, "exit",					ASN1_EOC,			ASN1_EXIT			}
 };
 #define NAME_CONSTRAINT_PERMITTED 2
@@ -896,13 +948,14 @@ static const asn1Object_t nameConstraintsObjects[] = {
 /**
  * Parse permitted/excluded nameConstraints
  */
-static void parse_nameConstraints(chunk_t blob, int level0,
+static bool parse_nameConstraints(chunk_t blob, int level0,
 								  private_x509_cert_t *this)
 {
 	asn1_parser_t *parser;
 	identification_t *id;
 	chunk_t object;
 	int objectID;
+	bool success = FALSE;
 
 	parser = asn1_parser_create(nameConstraintsObjects, blob);
 	parser->set_top_level(parser, level0);
@@ -913,59 +966,69 @@ static void parse_nameConstraints(chunk_t blob, int level0,
 		{
 			case NAME_CONSTRAINT_PERMITTED:
 				id = parse_generalName(object, parser->get_level(parser) + 1);
-				if (id)
+				if (!id)
 				{
-					this->permitted_names->insert_last(this->permitted_names, id);
+					goto end;
 				}
+				this->permitted_names->insert_last(this->permitted_names, id);
 				break;
 			case NAME_CONSTRAINT_EXCLUDED:
 				id = parse_generalName(object, parser->get_level(parser) + 1);
-				if (id)
+				if (!id)
 				{
-					this->excluded_names->insert_last(this->excluded_names, id);
+					goto end;
 				}
+				this->excluded_names->insert_last(this->excluded_names, id);
 				break;
 			default:
 				break;
 		}
 	}
+	success = parser->success(parser);
+
+end:
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
  * ASN.1 definition of a certificatePolicies extension
  */
 static const asn1Object_t certificatePoliciesObject[] = {
-	{ 0, "certificatePolicies",		ASN1_SEQUENCE,	ASN1_LOOP			}, /*  0 */
-	{ 1,   "policyInformation",		ASN1_SEQUENCE,	ASN1_NONE			}, /*  1 */
-	{ 2,     "policyId",			ASN1_OID,		ASN1_BODY			}, /*  2 */
-	{ 2,     "qualifiers",			ASN1_SEQUENCE,	ASN1_OPT|ASN1_LOOP	}, /*  3 */
-	{ 3,       "qualifierInfo",		ASN1_SEQUENCE,	ASN1_NONE			}, /*  4 */
-	{ 4,         "qualifierId",		ASN1_OID,		ASN1_BODY			}, /*  5 */
-	{ 4,         "cPSuri",			ASN1_IA5STRING,	ASN1_OPT|ASN1_BODY	}, /*  6 */
-	{ 4,         "end choice",		ASN1_EOC,		ASN1_END			}, /*  7 */
-	{ 4,         "userNotice",		ASN1_SEQUENCE,	ASN1_OPT|ASN1_BODY	}, /*  8 */
-	{ 5,           "explicitText",	ASN1_EOC,		ASN1_RAW			}, /*  9 */
-	{ 4,         "end choice",		ASN1_EOC,		ASN1_END			}, /* 10 */
-	{ 2,      "end opt/loop",		ASN1_EOC,		ASN1_END			}, /* 12 */
-	{ 0, "end loop",				ASN1_EOC,		ASN1_END			}, /* 13 */
-	{ 0, "exit",					ASN1_EOC,		ASN1_EXIT			}
+	{ 0, "certificatePolicies",      ASN1_SEQUENCE,  ASN1_LOOP            }, /*  0 */
+	{ 1,   "policyInformation",      ASN1_SEQUENCE,  ASN1_NONE            }, /*  1 */
+	{ 2,     "policyId",             ASN1_OID,       ASN1_BODY            }, /*  2 */
+	{ 2,     "qualifiers",           ASN1_SEQUENCE,  ASN1_OPT|ASN1_LOOP   }, /*  3 */
+	{ 3,       "qualifierInfo",      ASN1_SEQUENCE,  ASN1_NONE            }, /*  4 */
+	{ 4,         "qualifierId",      ASN1_OID,       ASN1_BODY            }, /*  5 */
+	{ 4,         "qualifier",        ASN1_EOC,       ASN1_CHOICE          }, /*  6 */
+	{ 5,           "cPSuri",         ASN1_IA5STRING, ASN1_OPT|ASN1_BODY   }, /*  7 */
+	{ 5,           "end choice",     ASN1_EOC,       ASN1_END|ASN1_CH     }, /*  8 */
+	{ 5,           "userNotice",     ASN1_SEQUENCE,  ASN1_OPT|ASN1_BODY   }, /*  9 */
+	{ 6,             "explicitText", ASN1_EOC,       ASN1_RAW             }, /* 10 */
+	{ 5,           "end choice",     ASN1_EOC,       ASN1_END|ASN1_CH     }, /* 11 */
+	{ 4,         "end choices",      ASN1_EOC,       ASN1_END|ASN1_CHOICE }, /* 12 */
+	{ 2,     "end opt/loop",         ASN1_EOC,       ASN1_END             }, /* 13 */
+	{ 0, "end loop",                 ASN1_EOC,       ASN1_END             }, /* 14 */
+	{ 0, "exit",                     ASN1_EOC,       ASN1_EXIT            }
 };
-#define CERT_POLICY_ID				2
-#define CERT_POLICY_QUALIFIER_ID	5
-#define CERT_POLICY_CPS_URI			6
-#define CERT_POLICY_EXPLICIT_TEXT	9
+#define CERT_POLICY_ID              2
+#define CERT_POLICY_QUALIFIER_ID    5
+#define CERT_POLICY_CPS_URI         7
+#define CERT_POLICY_EXPLICIT_TEXT  10
 
 /**
  * Parse certificatePolicies
  */
-static void parse_certificatePolicies(chunk_t blob, int level0,
+static bool parse_certificatePolicies(chunk_t blob, int level0,
 									  private_x509_cert_t *this)
 {
 	x509_cert_policy_t *policy = NULL;
 	asn1_parser_t *parser;
 	chunk_t object;
 	int objectID, qualifier = OID_UNKNOWN;
+	bool success;
 
 	parser = asn1_parser_create(certificatePoliciesObject, blob);
 	parser->set_top_level(parser, level0);
@@ -998,7 +1061,10 @@ static void parse_certificatePolicies(chunk_t blob, int level0,
 				break;
 		}
 	}
+	success = parser->success(parser);
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
@@ -1019,13 +1085,14 @@ static const asn1Object_t policyMappingsObjects[] = {
 /**
  * Parse policyMappings
  */
-static void parse_policyMappings(chunk_t blob, int level0,
+static bool parse_policyMappings(chunk_t blob, int level0,
 								 private_x509_cert_t *this)
 {
 	x509_policy_mapping_t *map = NULL;
 	asn1_parser_t *parser;
 	chunk_t object;
 	int objectID;
+	bool success;
 
 	parser = asn1_parser_create(policyMappingsObjects, blob);
 	parser->set_top_level(parser, level0);
@@ -1054,7 +1121,10 @@ static void parse_policyMappings(chunk_t blob, int level0,
 				break;
 		}
 	}
+	success = parser->success(parser);
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
@@ -1076,12 +1146,13 @@ static const asn1Object_t policyConstraintsObjects[] = {
 /**
  * Parse policyConstraints
  */
-static void parse_policyConstraints(chunk_t blob, int level0,
+static bool parse_policyConstraints(chunk_t blob, int level0,
 									private_x509_cert_t *this)
 {
 	asn1_parser_t *parser;
 	chunk_t object;
 	int objectID;
+	bool success;
 
 	parser = asn1_parser_create(policyConstraintsObjects, blob);
 	parser->set_top_level(parser, level0);
@@ -1100,34 +1171,41 @@ static void parse_policyConstraints(chunk_t blob, int level0,
 				break;
 		}
 	}
+	success = parser->success(parser);
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
  * ASN.1 definition of ipAddrBlocks according to RFC 3779
  */
 static const asn1Object_t ipAddrBlocksObjects[] = {
-	{ 0, "ipAddrBlocks",			ASN1_SEQUENCE,		ASN1_LOOP			}, /*  0 */
-	{ 1,   "ipAddressFamily",		ASN1_SEQUENCE,		ASN1_NONE			}, /*  1 */
-	{ 2,     "addressFamily",		ASN1_OCTET_STRING,	ASN1_BODY			}, /*  2 */
-	{ 2,     "inherit",				ASN1_NULL,			ASN1_OPT|ASN1_NONE	}, /*  3 */
-	{ 2,     "end choice",			ASN1_EOC,			ASN1_END			}, /*  4 */
-	{ 2,     "addressesOrRanges",	ASN1_SEQUENCE,		ASN1_OPT|ASN1_LOOP	}, /*  5 */
-	{ 3,       "addressPrefix",		ASN1_BIT_STRING,	ASN1_OPT|ASN1_BODY  }, /*  6 */
-	{ 3,       "end choice",		ASN1_EOC,			ASN1_END			}, /*  7 */
-	{ 3,       "addressRange",		ASN1_SEQUENCE,		ASN1_OPT|ASN1_NONE	}, /*  8 */
-	{ 4,         "min",				ASN1_BIT_STRING,	ASN1_BODY			}, /*  9 */
-	{ 4,         "max",				ASN1_BIT_STRING,	ASN1_BODY			}, /* 10 */
-	{ 3,       "end choice",		ASN1_EOC,			ASN1_END			}, /* 11 */
-	{ 2,     "end opt/loop",		ASN1_EOC,			ASN1_END			}, /* 12 */
-	{ 0, "end loop",				ASN1_EOC,			ASN1_END			}, /* 13 */
-	{ 0, "exit",					ASN1_EOC,			ASN1_EXIT			}
+	{ 0, "ipAddrBlocks",            ASN1_SEQUENCE,     ASN1_LOOP            }, /*  0 */
+	{ 1,   "ipAddressFamily",       ASN1_SEQUENCE,     ASN1_NONE            }, /*  1 */
+	{ 2,     "addressFamily",       ASN1_OCTET_STRING, ASN1_BODY            }, /*  2 */
+	{ 2,     "ipAddressChoice",     ASN1_EOC,          ASN1_CHOICE          }, /*  3 */
+	{ 3,       "inherit",           ASN1_NULL,         ASN1_OPT             }, /*  4 */
+	{ 3,       "end choice",        ASN1_EOC,          ASN1_END|ASN1_CH     }, /*  5 */
+	{ 3,       "addressesOrRanges", ASN1_SEQUENCE,     ASN1_OPT|ASN1_LOOP   }, /*  6 */
+	{ 4,         "addressOrRange",  ASN1_EOC,          ASN1_CHOICE          }, /*  7 */
+	{ 5,           "addressPrefix", ASN1_BIT_STRING,   ASN1_OPT|ASN1_BODY   }, /*  8 */
+	{ 5,           "end choice",    ASN1_EOC,          ASN1_END|ASN1_CH     }, /*  9 */
+	{ 5,           "addressRange",  ASN1_SEQUENCE,     ASN1_OPT             }, /* 10 */
+	{ 6,             "min",         ASN1_BIT_STRING,   ASN1_BODY            }, /* 11 */
+	{ 6,             "max",         ASN1_BIT_STRING,   ASN1_BODY            }, /* 12 */
+	{ 5,           "end choice",    ASN1_EOC,          ASN1_END|ASN1_CH     }, /* 13 */
+	{ 4,         "end choices",     ASN1_EOC,          ASN1_END|ASN1_CHOICE }, /* 14 */
+	{ 3,       "end loop/choice",   ASN1_EOC,          ASN1_END|ASN1_CH     }, /* 15 */
+	{ 2,     "end choices",         ASN1_EOC,          ASN1_END|ASN1_CHOICE }, /* 16 */
+	{ 0, "end loop",                ASN1_EOC,          ASN1_END             }, /* 17 */
+	{ 0, "exit",                    ASN1_EOC,          ASN1_EXIT            }
 };
 #define IP_ADDR_BLOCKS_FAMILY       2
-#define IP_ADDR_BLOCKS_INHERIT      3
-#define IP_ADDR_BLOCKS_PREFIX       6
-#define IP_ADDR_BLOCKS_MIN          9
-#define IP_ADDR_BLOCKS_MAX         10
+#define IP_ADDR_BLOCKS_INHERIT      4
+#define IP_ADDR_BLOCKS_PREFIX       8
+#define IP_ADDR_BLOCKS_MIN         11
+#define IP_ADDR_BLOCKS_MAX         12
 
 static bool check_address_object(ts_type_t ts_type, chunk_t object)
 {
@@ -1171,7 +1249,7 @@ static bool check_address_object(ts_type_t ts_type, chunk_t object)
 	return TRUE;
 }
 
-static void parse_ipAddrBlocks(chunk_t blob, int level0,
+static bool parse_ipAddrBlocks(chunk_t blob, int level0,
 							   private_x509_cert_t *this)
 {
 	asn1_parser_t *parser;
@@ -1179,6 +1257,7 @@ static void parse_ipAddrBlocks(chunk_t blob, int level0,
 	ts_type_t ts_type = 0;
 	traffic_selector_t *ts;
 	int objectID;
+	bool success = FALSE;
 
 	parser = asn1_parser_create(ipAddrBlocksObjects, blob);
 	parser->set_top_level(parser, level0);
@@ -1240,10 +1319,13 @@ static void parse_ipAddrBlocks(chunk_t blob, int level0,
 				break;
 		}
 	}
+	success = parser->success(parser);
 	this->flags |= X509_IP_ADDR_BLOCKS;
 
 end:
 	parser->destroy(parser);
+
+	return success;
 }
 
 /**
@@ -1303,11 +1385,14 @@ static bool parse_certificate(private_x509_cert_t *this)
 	chunk_t object;
 	int objectID;
 	int extn_oid = OID_UNKNOWN;
-	int sig_alg  = OID_UNKNOWN;
+	signature_params_t sig_alg = {};
 	bool success = FALSE;
 	bool critical = FALSE;
 
 	parser = asn1_parser_create(certObjects, this->encoding);
+
+	/* unless we see a keyUsage extension we are compliant with RFC 4945 */
+	this->flags |= X509_IKE_COMPLIANT;
 
 	while (parser->iterate(parser, &objectID, &object))
 	{
@@ -1334,7 +1419,11 @@ static bool parse_certificate(private_x509_cert_t *this)
 				this->serialNumber = object;
 				break;
 			case X509_OBJ_SIG_ALG:
-				sig_alg = asn1_parse_algorithmIdentifier(object, level, NULL);
+				if (!signature_params_parse(object, level, &sig_alg))
+				{
+					DBG1(DBG_ASN, "  unable to parse signature algorithm");
+					goto end;
+				}
 				break;
 			case X509_OBJ_ISSUER:
 				this->issuer = identification_create_from_encoding(ID_DER_ASN1_DN, object);
@@ -1387,43 +1476,74 @@ static bool parse_certificate(private_x509_cert_t *this)
 						this->subjectKeyIdentifier = object;
 						break;
 					case OID_SUBJECT_ALT_NAME:
-						x509_parse_generalNames(object, level, FALSE,
-												this->subjectAltNames);
+						if (!x509_parse_generalNames(object, level, FALSE,
+													 this->subjectAltNames))
+						{
+							goto end;
+						}
 						break;
 					case OID_BASIC_CONSTRAINTS:
-						parse_basicConstraints(object, level, this);
+						if (!parse_basicConstraints(object, level, this))
+						{
+							goto end;
+						}
 						break;
 					case OID_CRL_DISTRIBUTION_POINTS:
-						x509_parse_crlDistributionPoints(object, level,
-														 this->crl_uris);
+						if (!x509_parse_crlDistributionPoints(object, level,
+															  this->crl_uris))
+						{
+							goto end;
+						}
 						break;
 					case OID_AUTHORITY_KEY_ID:
-						this->authKeyIdentifier = x509_parse_authorityKeyIdentifier(object,
-														level, &this->authKeySerialNumber);
+						chunk_free(&this->authKeyIdentifier);
+						this->authKeyIdentifier = x509_parse_authorityKeyIdentifier(
+									object, level, &this->authKeySerialNumber);
 						break;
 					case OID_AUTHORITY_INFO_ACCESS:
-						parse_authorityInfoAccess(object, level, this);
+						if (!parse_authorityInfoAccess(object, level, this))
+						{
+							goto end;
+						}
 						break;
 					case OID_KEY_USAGE:
 						parse_keyUsage(object, this);
 						break;
 					case OID_EXTENDED_KEY_USAGE:
-						parse_extendedKeyUsage(object, level, this);
+						if (!parse_extendedKeyUsage(object, level, this))
+						{
+							goto end;
+						}
 						break;
 					case OID_IP_ADDR_BLOCKS:
-						parse_ipAddrBlocks(object, level, this);
+						if (!parse_ipAddrBlocks(object, level, this))
+						{
+							goto end;
+						}
 						break;
 					case OID_NAME_CONSTRAINTS:
-						parse_nameConstraints(object, level, this);
+						if (!parse_nameConstraints(object, level, this))
+						{
+							goto end;
+						}
 						break;
 					case OID_CERTIFICATE_POLICIES:
-						parse_certificatePolicies(object, level, this);
+						if (!parse_certificatePolicies(object, level, this))
+						{
+							goto end;
+						}
 						break;
 					case OID_POLICY_MAPPINGS:
-						parse_policyMappings(object, level, this);
+						if (!parse_policyMappings(object, level, this))
+						{
+							goto end;
+						}
 						break;
 					case OID_POLICY_CONSTRAINTS:
-						parse_policyConstraints(object, level, this);
+						if (!parse_policyConstraints(object, level, this))
+						{
+							goto end;
+						}
 						break;
 					case OID_INHIBIT_ANY_POLICY:
 						if (!asn1_parse_simple_object(&object, ASN1_INTEGER,
@@ -1457,8 +1577,13 @@ static bool parse_certificate(private_x509_cert_t *this)
 				break;
 			}
 			case X509_OBJ_ALGORITHM:
-				this->algorithm = asn1_parse_algorithmIdentifier(object, level, NULL);
-				if (this->algorithm != sig_alg)
+				INIT(this->scheme);
+				if (!signature_params_parse(object, level, this->scheme))
+				{
+					DBG1(DBG_ASN, "  unable to parse signature algorithm");
+					goto end;
+				}
+				if (!signature_params_equal(this->scheme, &sig_alg))
 				{
 					DBG1(DBG_ASN, "  signature algorithms do not agree");
 					goto end;
@@ -1475,6 +1600,7 @@ static bool parse_certificate(private_x509_cert_t *this)
 
 end:
 	parser->destroy(parser);
+	signature_params_clear(&sig_alg);
 	if (success)
 	{
 		hasher_t *hasher;
@@ -1574,10 +1700,9 @@ METHOD(certificate_t, has_issuer, id_match_t,
 
 METHOD(certificate_t, issued_by, bool,
 	private_x509_cert_t *this, certificate_t *issuer,
-	signature_scheme_t *schemep)
+	signature_params_t **scheme)
 {
 	public_key_t *key;
-	signature_scheme_t scheme;
 	bool valid;
 	x509_t *x509 = (x509_t*)issuer;
 
@@ -1585,6 +1710,10 @@ METHOD(certificate_t, issued_by, bool,
 	{
 		if (this->flags & X509_SELF_SIGNED)
 		{
+			if (scheme)
+			{
+				*scheme = signature_params_clone(this->scheme);
+			}
 			return TRUE;
 		}
 	}
@@ -1604,23 +1733,18 @@ METHOD(certificate_t, issued_by, bool,
 		return FALSE;
 	}
 
-	/* determine signature scheme */
-	scheme = signature_scheme_from_oid(this->algorithm);
-	if (scheme == SIGN_UNKNOWN)
-	{
-		return FALSE;
-	}
 	/* get the public key of the issuer */
 	key = issuer->get_public_key(issuer);
 	if (!key)
 	{
 		return FALSE;
 	}
-	valid = key->verify(key, scheme, this->tbsCertificate, this->signature);
+	valid = key->verify(key, this->scheme->scheme, this->scheme->params,
+						this->tbsCertificate, this->signature);
 	key->destroy(key);
-	if (valid && schemep)
+	if (valid && scheme)
 	{
-		*schemep = scheme;
+		*scheme = signature_params_clone(this->scheme);
 	}
 	return valid;
 }
@@ -1807,7 +1931,8 @@ METHOD(certificate_t, destroy, void,
 	{
 		this->subjectAltNames->destroy_offset(this->subjectAltNames,
 									offsetof(identification_t, destroy));
-		this->crl_uris->destroy_function(this->crl_uris, (void*)crl_uri_destroy);
+		this->crl_uris->destroy_function(this->crl_uris,
+										 (void*)x509_cdp_destroy);
 		this->ocsp_uris->destroy_function(this->ocsp_uris, free);
 		this->ipAddrBlocks->destroy_offset(this->ipAddrBlocks,
 										offsetof(traffic_selector_t, destroy));
@@ -1819,6 +1944,7 @@ METHOD(certificate_t, destroy, void,
 											  (void*)cert_policy_destroy);
 		this->policy_mappings->destroy_function(this->policy_mappings,
 											  (void*)policy_mapping_destroy);
+		signature_params_destroy(this->scheme);
 		DESTROY_IF(this->issuer);
 		DESTROY_IF(this->subject);
 		DESTROY_IF(this->public_key);
@@ -1900,6 +2026,8 @@ chunk_t build_generalName(identification_t *id)
 
 	switch (id->get_type(id))
 	{
+		case ID_DER_ASN1_GN:
+			return chunk_clone(id->get_encoding(id));
 		case ID_RFC822_ADDR:
 			context = ASN1_CONTEXT_S_1;
 			break;
@@ -1992,6 +2120,72 @@ chunk_t x509_build_crlDistributionPoints(linked_list_t *list, int extn)
 					asn1_wrap(ASN1_SEQUENCE, "m", crlDistributionPoints)));
 }
 
+static chunk_t generate_ts(traffic_selector_t *ts)
+{
+	chunk_t from, to;
+	uint8_t minbits = 0, maxbits = 0, unused;
+	host_t *net;
+	int bit, byte;
+
+	if (ts->to_subnet(ts, &net, &minbits))
+	{
+		unused = round_up(minbits, BITS_PER_BYTE) - minbits;
+		from = asn1_wrap(ASN1_BIT_STRING, "m",
+			chunk_cat("cc", chunk_from_thing(unused),
+							chunk_create(net->get_address(net).ptr,
+										 (minbits + unused) / BITS_PER_BYTE)));
+		net->destroy(net);
+		return from;
+	}
+	net->destroy(net);
+
+	from = ts->get_from_address(ts);
+	for (byte = from.len - 1; byte >= 0; byte--)
+	{
+		if (from.ptr[byte] != 0)
+		{
+			minbits = byte * BITS_PER_BYTE + BITS_PER_BYTE;
+			for (bit = 0; bit < BITS_PER_BYTE; bit++)
+			{
+				if (from.ptr[byte] & 1 << bit)
+				{
+					break;
+				}
+				minbits--;
+			}
+			break;
+		}
+	}
+	to = ts->get_to_address(ts);
+	for (byte = to.len - 1; byte >= 0; byte--)
+	{
+		if (to.ptr[byte] != 0xFF)
+		{
+			maxbits = byte * BITS_PER_BYTE + BITS_PER_BYTE;
+			for (bit = 0; bit < BITS_PER_BYTE; bit++)
+			{
+				if ((to.ptr[byte] & 1 << bit) == 0)
+				{
+					break;
+				}
+				maxbits--;
+			}
+			break;
+		}
+	}
+	unused = round_up(minbits, BITS_PER_BYTE) - minbits;
+	from = asn1_wrap(ASN1_BIT_STRING, "m",
+			chunk_cat("cc", chunk_from_thing(unused),
+							chunk_create(from.ptr,
+										 (minbits + unused) / BITS_PER_BYTE)));
+	unused = round_up(maxbits, BITS_PER_BYTE) - maxbits;
+	to = asn1_wrap(ASN1_BIT_STRING, "m",
+			chunk_cat("cc", chunk_from_thing(unused),
+							chunk_create(to.ptr,
+										 (maxbits + unused) / BITS_PER_BYTE)));
+	return asn1_wrap(ASN1_SEQUENCE, "mm", from, to);
+}
+
 /**
  * Generate and sign a new certificate
  */
@@ -2008,9 +2202,9 @@ static bool generate(private_x509_cert_t *cert, certificate_t *sign_cert,
 	chunk_t crlDistributionPoints = chunk_empty, authorityInfoAccess = chunk_empty;
 	chunk_t policyConstraints = chunk_empty, inhibitAnyPolicy = chunk_empty;
 	chunk_t ikeIntermediate = chunk_empty, msSmartcardLogon = chunk_empty;
+	chunk_t ipAddrBlocks = chunk_empty, sig_scheme = chunk_empty;
 	identification_t *issuer, *subject;
 	chunk_t key_info;
-	signature_scheme_t scheme;
 	hasher_t *hasher;
 	enumerator_t *enumerator;
 	char *uri;
@@ -2043,18 +2237,28 @@ static bool generate(private_x509_cert_t *cert, certificate_t *sign_cert,
 		cert->notAfter = cert->notBefore + 60 * 60 * 24 * 365;
 	}
 
-	/* select signature scheme */
-	cert->algorithm = hasher_signature_algorithm_to_oid(digest_alg,
-								sign_key->get_type(sign_key));
-	if (cert->algorithm == OID_UNKNOWN)
+	/* select signature scheme, if not already specified */
+	if (!cert->scheme)
+	{
+		INIT(cert->scheme,
+			.scheme = signature_scheme_from_oid(
+								hasher_signature_algorithm_to_oid(digest_alg,
+												sign_key->get_type(sign_key))),
+		);
+	}
+	if (cert->scheme->scheme == SIGN_UNKNOWN)
 	{
 		return FALSE;
 	}
-	scheme = signature_scheme_from_oid(cert->algorithm);
+	if (!signature_params_build(cert->scheme, &sig_scheme))
+	{
+		return FALSE;
+	}
 
 	if (!cert->public_key->get_encoding(cert->public_key,
 										PUBKEY_SPKI_ASN1_DER, &key_info))
 	{
+		chunk_free(&sig_scheme);
 		return FALSE;
 	}
 
@@ -2182,6 +2386,52 @@ static bool generate(private_x509_cert_t *cert, certificate_t *sign_cert,
 								asn1_wrap(ASN1_SEQUENCE, "m",
 									asn1_wrap(ASN1_CONTEXT_S_0, "c", keyid))));
 		}
+	}
+
+	if (cert->ipAddrBlocks->get_count(cert->ipAddrBlocks))
+	{
+		chunk_t v4blocks = chunk_empty, v6blocks = chunk_empty, block;
+		traffic_selector_t *ts;
+
+		enumerator = cert->ipAddrBlocks->create_enumerator(cert->ipAddrBlocks);
+		while (enumerator->enumerate(enumerator, &ts))
+		{
+			switch (ts->get_type(ts))
+			{
+				case TS_IPV4_ADDR_RANGE:
+					block = generate_ts(ts);
+					v4blocks = chunk_cat("mm", v4blocks, block);
+					break;
+				case TS_IPV6_ADDR_RANGE:
+					block = generate_ts(ts);
+					v6blocks = chunk_cat("mm", v6blocks, block);
+					break;
+				default:
+					break;
+			}
+		}
+		enumerator->destroy(enumerator);
+
+		if (v4blocks.ptr)
+		{
+			v4blocks = asn1_wrap(ASN1_SEQUENCE, "mm",
+						asn1_wrap(ASN1_OCTET_STRING, "c",
+							chunk_from_chars(0x00,0x01)),
+						asn1_wrap(ASN1_SEQUENCE, "m", v4blocks));
+		}
+		if (v6blocks.ptr)
+		{
+			v6blocks = asn1_wrap(ASN1_SEQUENCE, "mm",
+						asn1_wrap(ASN1_OCTET_STRING, "c",
+							chunk_from_chars(0x00,0x02)),
+						asn1_wrap(ASN1_SEQUENCE, "m", v6blocks));
+		}
+		ipAddrBlocks = asn1_wrap(ASN1_SEQUENCE, "mm",
+						asn1_build_known_oid(OID_IP_ADDR_BLOCKS),
+						asn1_wrap(ASN1_OCTET_STRING, "m",
+							asn1_wrap(ASN1_SEQUENCE, "mm",
+								v4blocks, v6blocks)));
+		cert->flags |= X509_IP_ADDR_BLOCKS;
 	}
 
 	if (cert->permitted_names->get_count(cert->permitted_names) ||
@@ -2321,21 +2571,22 @@ static bool generate(private_x509_cert_t *cert, certificate_t *sign_cert,
 	}
 
 	if (basicConstraints.ptr || subjectAltNames.ptr || authKeyIdentifier.ptr ||
-		crlDistributionPoints.ptr || nameConstraints.ptr)
+		crlDistributionPoints.ptr || nameConstraints.ptr || ipAddrBlocks.ptr)
 	{
 		extensions = asn1_wrap(ASN1_CONTEXT_C_3, "m",
-						asn1_wrap(ASN1_SEQUENCE, "mmmmmmmmmmmmm",
+						asn1_wrap(ASN1_SEQUENCE, "mmmmmmmmmmmmmm",
 							basicConstraints, keyUsage, subjectKeyIdentifier,
 							authKeyIdentifier, subjectAltNames,
 							extendedKeyUsage, crlDistributionPoints,
 							authorityInfoAccess, nameConstraints, certPolicies,
-							policyMappings, policyConstraints, inhibitAnyPolicy));
+							policyMappings, policyConstraints, inhibitAnyPolicy,
+							ipAddrBlocks));
 	}
 
-	cert->tbsCertificate = asn1_wrap(ASN1_SEQUENCE, "mmmcmcmm",
+	cert->tbsCertificate = asn1_wrap(ASN1_SEQUENCE, "mmccmcmm",
 		asn1_simple_object(ASN1_CONTEXT_C_0, ASN1_INTEGER_2),
 		asn1_integer("c", cert->serialNumber),
-		asn1_algorithmIdentifier(cert->algorithm),
+		sig_scheme,
 		issuer->get_encoding(issuer),
 		asn1_wrap(ASN1_SEQUENCE, "mm",
 			asn1_from_time(&cert->notBefore, ASN1_UTCTIME),
@@ -2343,12 +2594,14 @@ static bool generate(private_x509_cert_t *cert, certificate_t *sign_cert,
 		subject->get_encoding(subject),
 		key_info, extensions);
 
-	if (!sign_key->sign(sign_key, scheme, cert->tbsCertificate, &cert->signature))
+	if (!sign_key->sign(sign_key, cert->scheme->scheme, cert->scheme->params,
+						cert->tbsCertificate, &cert->signature))
 	{
+		chunk_free(&sig_scheme);
 		return FALSE;
 	}
 	cert->encoding = asn1_wrap(ASN1_SEQUENCE, "cmm", cert->tbsCertificate,
-							   asn1_algorithmIdentifier(cert->algorithm),
+							   sig_scheme,
 							   asn1_bitstring("c", cert->signature));
 
 	hasher = lib->crypto->create_hasher(lib->crypto, HASH_SHA1);
@@ -2412,7 +2665,7 @@ x509_cert_t *x509_cert_gen(certificate_type_t type, va_list args)
 	private_x509_cert_t *cert;
 	certificate_t *sign_cert = NULL;
 	private_key_t *sign_key = NULL;
-	hash_algorithm_t digest_alg = HASH_SHA1;
+	hash_algorithm_t digest_alg = HASH_SHA256;
 	u_int constraint;
 
 	cert = create_empty();
@@ -2492,6 +2745,22 @@ x509_cert_t *x509_cert_gen(certificate_type_t type, va_list args)
 				cert->pathLenConstraint = (constraint < 128) ?
 										   constraint : X509_NO_CONSTRAINT;
 				continue;
+			case BUILD_ADDRBLOCKS:
+			{
+				enumerator_t *enumerator;
+				traffic_selector_t *ts;
+				linked_list_t *list;
+
+				list = va_arg(args, linked_list_t*);
+				enumerator = list->create_enumerator(list);
+				while (enumerator->enumerate(enumerator, &ts))
+				{
+					cert->ipAddrBlocks->insert_last(cert->ipAddrBlocks,
+													ts->clone(ts));
+				}
+				enumerator->destroy(enumerator);
+				continue;
+			}
 			case BUILD_PERMITTED_NAME_CONSTRAINTS:
 			{
 				enumerator_t *enumerator;
@@ -2587,6 +2856,10 @@ x509_cert_t *x509_cert_gen(certificate_type_t type, va_list args)
 				continue;
 			case BUILD_SERIAL:
 				cert->serialNumber = chunk_clone(va_arg(args, chunk_t));
+				continue;
+			case BUILD_SIGNATURE_SCHEME:
+				cert->scheme = va_arg(args, signature_params_t*);
+				cert->scheme = signature_params_clone(cert->scheme);
 				continue;
 			case BUILD_DIGEST_ALG:
 				digest_alg = va_arg(args, int);

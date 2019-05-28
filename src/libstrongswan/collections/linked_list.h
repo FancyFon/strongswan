@@ -1,8 +1,8 @@
 /*
- * Copyright (C) 2007-2015 Tobias Brunner
+ * Copyright (C) 2007-2018 Tobias Brunner
  * Copyright (C) 2005-2008 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -28,23 +28,30 @@ typedef struct linked_list_t linked_list_t;
 #include <collections/enumerator.h>
 
 /**
- * Method to match elements in a linked list (used in find_* functions)
+ * Function to match elements in a linked list
  *
  * @param item			current list item
- * @param ...			user supplied data (only pointers, at most 5)
- * @return
- *						- TRUE, if the item matched
- *						- FALSE, otherwise
+ * @param args			user supplied data
+ * @return				TRUE, if the item matched, FALSE otherwise
  */
-typedef bool (*linked_list_match_t)(void *item, ...);
+typedef bool (*linked_list_match_t)(void *item, va_list args);
 
 /**
- * Method to be invoked on elements in a linked list (used in invoke_* functions)
+ * Helper function to match a string in a linked list of strings
+ *
+ * @param item			list item (char*)
+ * @param args			user supplied data (char*)
+ * @return
+ */
+bool linked_list_match_str(void *item, va_list args);
+
+/**
+ * Function to be invoked on elements in a linked list
  *
  * @param item			current list item
- * @param ...			user supplied data (only pointers, at most 5)
+ * @param args			user supplied data
  */
-typedef void (*linked_list_invoke_t)(void *item, ...);
+typedef void (*linked_list_invoke_t)(void *item, va_list args);
 
 /**
  * Class implementing a double linked list.
@@ -95,12 +102,17 @@ struct linked_list_t {
 	/**
 	 * Inserts a new item before the item the enumerator currently points to.
 	 *
-	 * If this method is called before starting the enumeration the item is
-	 * inserted first. If it is called after all items have been enumerated
-	 * the item is inserted last. This is helpful when inserting items into
-	 * a sorted list.
+	 * If this method is called after all items have been enumerated, the item
+	 * is inserted last.  This is helpful when inserting items into a sorted
+	 * list.
 	 *
-	 * @note The position of the enumerator is not changed.
+	 * @note The position of the enumerator is not changed. So it is safe to
+	 * call this before or after remove_at() to replace the item at the current
+	 * position (the enumerator will continue with the next item in the list).
+	 * And in particular, when inserting an item before calling enumerate(),
+	 * the enumeration will continue (or start) at the item that was first in
+	 * the list before any items were inserted (enumerate() will return FALSE
+	 * if the list was empty before).
 	 *
 	 * @param enumerator	enumerator with position
 	 * @param item			item value to insert in list
@@ -110,6 +122,10 @@ struct linked_list_t {
 
 	/**
 	 * Remove an item from the list where the enumerator points to.
+	 *
+	 * If this method is called before calling enumerate() of the enumerator,
+	 * the first item in the list, if any, will be removed.  No item is removed,
+	 * if the method is called after enumerating all items.
 	 *
 	 * @param enumerator enumerator with position
 	 */
@@ -167,21 +183,20 @@ struct linked_list_t {
 	 *
 	 * The first object passed to the match function is the current list item,
 	 * followed by the user supplied data.
-	 * If the supplied function returns TRUE this function returns SUCCESS, and
-	 * the current object is returned in the third parameter, otherwise,
+	 * If the supplied function returns TRUE so does this function, and the
+	 * current object is returned in the third parameter (if given), otherwise,
 	 * the next item is checked.
 	 *
 	 * If match is NULL, *item and the current object are compared.
 	 *
-	 * @warning Only use pointers as user supplied data.
-	 *
 	 * @param match			comparison function to call on each object, or NULL
-	 * @param item			the list item, if found
-	 * @param ...			user data to supply to match function (limited to 5 arguments)
-	 * @return				SUCCESS if found, NOT_FOUND otherwise
+	 * @param item			the list item, if found, or NULL
+	 * @param ...			user data to supply to match function
+	 * @return				TRUE if found, FALSE otherwise (or if neither match,
+	 *						nor item is supplied)
 	 */
-	status_t (*find_first) (linked_list_t *this, linked_list_match_t match,
-							void **item, ...);
+	bool (*find_first)(linked_list_t *this, linked_list_match_t match,
+					   void **item, ...);
 
 	/**
 	 * Invoke a method on all of the contained objects.
@@ -189,30 +204,26 @@ struct linked_list_t {
 	 * If a linked list contains objects with function pointers,
 	 * invoke() can call a method on each of the objects. The
 	 * method is specified by an offset of the function pointer,
-	 * which can be evalutated at compile time using the offsetof
+	 * which can be evaluated at compile time using the offsetof
 	 * macro, e.g.: list->invoke(list, offsetof(object_t, method));
 	 *
-	 * @warning Only use pointers as user supplied data.
-	 *
 	 * @param offset	offset of the method to invoke on objects
-	 * @param ...		user data to supply to called function (limited to 5 arguments)
 	 */
-	void (*invoke_offset) (linked_list_t *this, size_t offset, ...);
+	void (*invoke_offset)(linked_list_t *this, size_t offset);
 
 	/**
 	 * Invoke a function on all of the contained objects.
 	 *
-	 * @warning Only use pointers as user supplied data.
-	 *
-	 * @param function	offset of the method to invoke on objects
-	 * @param ...		user data to supply to called function (limited to 5 arguments)
+	 * @param function	function to call for each object
+	 * @param ...		user data to supply to called function
 	 */
-	void (*invoke_function) (linked_list_t *this, linked_list_invoke_t function, ...);
+	void (*invoke_function)(linked_list_t *this, linked_list_invoke_t function,
+							...);
 
 	/**
 	 * Clones a list and its objects using the objects' clone method.
 	 *
-	 * @param offset	offset ot the objects clone function
+	 * @param offset	offset to the objects clone function
 	 * @return			cloned list
 	 */
 	linked_list_t *(*clone_offset) (linked_list_t *this, size_t offset);

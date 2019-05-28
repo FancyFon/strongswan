@@ -1,9 +1,9 @@
 /*
+ * Copyright (C) 2017 Tobias Brunner
  * Copyright (C) 2002 Ueli Galizzi, Ariane Seiler
  * Copyright (C) 2003 Martin Berner, Lukas Suter
- * Copyright (C) 2002-2014 Andreas Steffen
+ * Copyright (C) 2002-2017 Andreas Steffen
  * Copyright (C) 2009 Martin Willi
- *
  * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -117,9 +117,9 @@ struct private_x509_ac_t {
 	bool noRevAvail;
 
 	/**
-	 * Signature algorithm
+	 * Signature scheme
 	 */
-	int algorithm;
+	signature_params_t *scheme;
 
 	/**
 	 * Signature
@@ -177,7 +177,7 @@ static chunk_t ASN1_noRevAvail_ext = chunk_from_chars(
 /**
  * declaration of function implemented in x509_cert.c
  */
-extern void x509_parse_generalNames(chunk_t blob, int level0, bool implicit,
+extern bool x509_parse_generalNames(chunk_t blob, int level0, bool implicit,
 									linked_list_t *list);
 /**
  * parses a directoryName
@@ -191,7 +191,11 @@ static bool parse_directoryName(chunk_t blob, int level, bool implicit,
 	linked_list_t *list;
 
 	list = linked_list_create();
-	x509_parse_generalNames(blob, level, implicit, list);
+	if (!x509_parse_generalNames(blob, level, implicit, list))
+	{
+		list->destroy(list);
+		return FALSE;
+	}
 
 	enumerator = list->create_enumerator(list);
 	while (enumerator->enumerate(enumerator, &directoryName))
@@ -422,7 +426,7 @@ static bool parse_certificate(private_x509_ac_t *this)
 	int objectID;
 	int type     = OID_UNKNOWN;
 	int extn_oid = OID_UNKNOWN;
-	int sig_alg  = OID_UNKNOWN;
+	signature_params_t sig_alg = {};
 	bool success = FALSE;
 	bool critical;
 
@@ -473,7 +477,11 @@ static bool parse_certificate(private_x509_ac_t *this)
 				}
 				break;
 			case AC_OBJ_SIG_ALG:
-				sig_alg = asn1_parse_algorithmIdentifier(object, level, NULL);
+				if (!signature_params_parse(object, level, &sig_alg))
+				{
+					DBG1(DBG_ASN, "  unable to parse signature algorithm");
+					goto end;
+				}
 				break;
 			case AC_OBJ_SERIAL_NUMBER:
 				this->serialNumber = chunk_clone(object);
@@ -547,12 +555,15 @@ static bool parse_certificate(private_x509_ac_t *this)
 				break;
 			}
 			case AC_OBJ_ALGORITHM:
-				this->algorithm = asn1_parse_algorithmIdentifier(object, level,
-																 NULL);
-				if (this->algorithm != sig_alg)
+				INIT(this->scheme);
+				if (!signature_params_parse(object, level, this->scheme))
+				{
+					DBG1(DBG_ASN, "  unable to parse signature algorithm");
+					goto end;
+				}
+				if (!signature_params_equal(this->scheme, &sig_alg))
 				{
 					DBG1(DBG_ASN, "  signature algorithms do not agree");
-					success = FALSE;
 					goto end;
 				}
 				break;
@@ -567,6 +578,7 @@ static bool parse_certificate(private_x509_ac_t *this)
 
 end:
 	parser->destroy(parser);
+	signature_params_clear(&sig_alg);
 	return success;
 }
 
@@ -739,13 +751,13 @@ static chunk_t build_extensions(private_x509_ac_t *this)
 /**
  * build attributeCertificateInfo
  */
-static chunk_t build_attr_cert_info(private_x509_ac_t *this)
+static chunk_t build_attr_cert_info(private_x509_ac_t *this, chunk_t sig_scheme)
 {
-	return asn1_wrap(ASN1_SEQUENCE, "cmmmmmmm",
+	return asn1_wrap(ASN1_SEQUENCE, "cmmcmmmm",
 				ASN1_INTEGER_1,
 				build_holder(this),
 				build_v2_form(this),
-				asn1_algorithmIdentifier(OID_SHA1_WITH_RSA),
+				sig_scheme,
 				asn1_simple_object(ASN1_INTEGER, this->serialNumber),
 				build_attr_cert_validity(this),
 				build_attributes(this),
@@ -755,20 +767,39 @@ static chunk_t build_attr_cert_info(private_x509_ac_t *this)
 /**
  * build an X.509 attribute certificate
  */
-static bool build_ac(private_x509_ac_t *this)
+static bool build_ac(private_x509_ac_t *this, hash_algorithm_t digest_alg)
 {
-	chunk_t signatureValue, attributeCertificateInfo;
+	chunk_t signatureValue, attributeCertificateInfo, sig_scheme;
+	private_key_t *key = this->signerKey;
 
-	attributeCertificateInfo = build_attr_cert_info(this);
-	if (!this->signerKey->sign(this->signerKey, SIGN_RSA_EMSA_PKCS1_SHA1,
-							   attributeCertificateInfo, &signatureValue))
+	if (!this->scheme)
+	{
+		INIT(this->scheme,
+			.scheme = signature_scheme_from_oid(
+								hasher_signature_algorithm_to_oid(digest_alg,
+												key->get_type(key))),
+		);
+	}
+	if (this->scheme->scheme == SIGN_UNKNOWN)
+	{
+		return FALSE;
+	}
+	if (!signature_params_build(this->scheme, &sig_scheme))
+	{
+		return FALSE;
+	}
+
+	attributeCertificateInfo = build_attr_cert_info(this, sig_scheme);
+	if (!key->sign(key, this->scheme->scheme, this->scheme->params,
+				   attributeCertificateInfo, &signatureValue))
 	{
 		free(attributeCertificateInfo.ptr);
+		free(sig_scheme.ptr);
 		return FALSE;
 	}
 	this->encoding = asn1_wrap(ASN1_SEQUENCE, "mmm",
 						attributeCertificateInfo,
-						asn1_algorithmIdentifier(OID_SHA1_WITH_RSA),
+						sig_scheme,
 						asn1_bitstring("m", signatureValue));
 	return TRUE;
 }
@@ -801,20 +832,27 @@ METHOD(ac_t, get_authKeyIdentifier, chunk_t,
 	return this->authKeyIdentifier;
 }
 
-/**
- * Filter function for attribute enumeration
- */
-static bool attr_filter(void *null, group_t **in, ac_group_type_t *type,
-						void *in2, chunk_t *out)
+CALLBACK(attr_filter, bool,
+	void *null, enumerator_t *orig, va_list args)
 {
-	if ((*in)->type == AC_GROUP_TYPE_STRING &&
-		!chunk_printable((*in)->value, NULL, 0))
-	{	/* skip non-printable strings */
-		return FALSE;
+	group_t *group;
+	ac_group_type_t *type;
+	chunk_t *out;
+
+	VA_ARGS_VGET(args, type, out);
+
+	while (orig->enumerate(orig, &group))
+	{
+		if (group->type == AC_GROUP_TYPE_STRING &&
+			!chunk_printable(group->value, NULL, 0))
+		{	/* skip non-printable strings */
+			continue;
+		}
+		*type = group->type;
+		*out = group->value;
+		return TRUE;
 	}
-	*type = (*in)->type;
-	*out = (*in)->value;
-	return TRUE;
+	return FALSE;
 }
 
 METHOD(ac_t, create_group_enumerator, enumerator_t*,
@@ -822,7 +860,7 @@ METHOD(ac_t, create_group_enumerator, enumerator_t*,
 {
 	return enumerator_create_filter(
 							this->groups->create_enumerator(this->groups),
-							(void*)attr_filter, NULL, NULL);
+							attr_filter, NULL, NULL);
 }
 
 METHOD(certificate_t, get_type, certificate_type_t,
@@ -876,10 +914,10 @@ METHOD(certificate_t, has_issuer, id_match_t,
 }
 
 METHOD(certificate_t, issued_by, bool,
-	private_x509_ac_t *this, certificate_t *issuer, signature_scheme_t *schemep)
+	private_x509_ac_t *this, certificate_t *issuer,
+	signature_params_t **scheme)
 {
 	public_key_t *key;
-	signature_scheme_t scheme;
 	bool valid;
 	x509_t *x509 = (x509_t*)issuer;
 
@@ -916,18 +954,16 @@ METHOD(certificate_t, issued_by, bool,
 		}
 	}
 
-	/* determine signature scheme */
-	scheme = signature_scheme_from_oid(this->algorithm);
-
-	if (scheme == SIGN_UNKNOWN || key == NULL)
+	if (!key)
 	{
 		return FALSE;
 	}
-	valid = key->verify(key, scheme, this->certificateInfo, this->signature);
+	valid = key->verify(key, this->scheme->scheme, this->scheme->params,
+						this->certificateInfo, this->signature);
 	key->destroy(key);
-	if (valid && schemep)
+	if (valid && scheme)
 	{
-		*schemep = scheme;
+		*scheme = signature_params_clone(this->scheme);
 	}
 	return valid;
 }
@@ -1010,6 +1046,7 @@ METHOD(certificate_t, destroy, void,
 		DESTROY_IF(this->signerCert);
 		DESTROY_IF(this->signerKey);
 		this->groups->destroy_function(this->groups, (void*)group_destroy);
+		signature_params_destroy(this->scheme);
 		free(this->serialNumber.ptr);
 		free(this->authKeyIdentifier.ptr);
 		free(this->encoding.ptr);
@@ -1116,6 +1153,7 @@ static void add_groups_from_list(private_x509_ac_t *this, linked_list_t *list)
  */
 x509_ac_t *x509_ac_gen(certificate_type_t type, va_list args)
 {
+	hash_algorithm_t digest_alg = HASH_SHA1;
 	private_x509_ac_t *ac;
 
 	ac = create_empty();
@@ -1147,6 +1185,13 @@ x509_ac_t *x509_ac_gen(certificate_type_t type, va_list args)
 				ac->signerKey = va_arg(args, private_key_t*);
 				ac->signerKey->get_ref(ac->signerKey);
 				continue;
+			case BUILD_SIGNATURE_SCHEME:
+				ac->scheme = va_arg(args, signature_params_t*);
+				ac->scheme = signature_params_clone(ac->scheme);
+				continue;
+			case BUILD_DIGEST_ALG:
+				digest_alg = va_arg(args, int);
+				continue;
 			case BUILD_END:
 				break;
 			default:
@@ -1160,7 +1205,7 @@ x509_ac_t *x509_ac_gen(certificate_type_t type, va_list args)
 		ac->holderCert->get_type(ac->holderCert) == CERT_X509 &&
 		ac->signerCert->get_type(ac->signerCert) == CERT_X509)
 	{
-		if (build_ac(ac))
+		if (build_ac(ac, digest_alg))
 		{
 			return &ac->public;
 		}

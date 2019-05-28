@@ -2,7 +2,7 @@
  * Copyright (C) 2012 Tobias Brunner
  * Copyright (C) 2005-2010 Martin Willi
  * Copyright (C) 2005 Jan Hutter
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -270,8 +270,12 @@ typedef struct {
 } type_enumerator_t;
 
 METHOD(enumerator_t, enumerate_types, bool,
-	type_enumerator_t *this, eap_type_t *type, uint32_t *vendor)
+	type_enumerator_t *this, va_list args)
 {
+	eap_type_t *type;
+	uint32_t *vendor;
+
+	VA_ARGS_VGET(args, type, vendor);
 	this->offset = extract_type(this->payload, this->offset, type, vendor);
 	return this->offset;
 }
@@ -289,7 +293,8 @@ METHOD(eap_payload_t, get_types, enumerator_t*,
 	{
 		INIT(enumerator,
 			.public = {
-				.enumerate = (void*)_enumerate_types,
+				.enumerate = enumerator_enumerate_default,
+				.venumerate = _enumerate_types,
 				.destroy = (void*)free,
 			},
 			.payload = this,
@@ -436,7 +441,7 @@ eap_payload_t *eap_payload_create_nak(uint8_t identifier, eap_type_t type,
 			added_any = TRUE;
 		}
 		else if (reg_vendor)
-		{	/* found vendor specifc method, but this is not an expanded Nak */
+		{	/* found vendor specific method, but this is not an expanded Nak */
 			found_vendor = TRUE;
 		}
 	}

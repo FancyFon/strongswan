@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Andreas Steffen
+ * Copyright (C) 2016-2017 Andreas Steffen
  * Copyright (C) 2012-2015 Tobias Brunner
  * Copyright (C) 2005-2006 Martin Willi
  * Copyright (C) 2005 Jan Hutter
@@ -27,20 +27,21 @@
 typedef enum hash_algorithm_t hash_algorithm_t;
 typedef struct hasher_t hasher_t;
 
-#include <library.h>
 #include <crypto/prfs/prf.h>
 #include <crypto/signers/signer.h>
 #include <credentials/keys/public_key.h>
 
 /**
- * Hash algorithms as defined for IKEv2 by RFC 7427
+ * Hash algorithms as defined for IKEv2
  */
 enum hash_algorithm_t {
-	HASH_IDENTITY		= 0,
+	/* RFC 7427 */
 	HASH_SHA1 			= 1,
 	HASH_SHA256			= 2,
 	HASH_SHA384			= 3,
 	HASH_SHA512			= 4,
+	/* RFC 8420 */
+	HASH_IDENTITY		= 5,
 	/* use private use range for algorithms not defined/permitted by RFC 7427 */
 	HASH_UNKNOWN 		= 1024,
 	HASH_MD2 			= 1025,
@@ -71,6 +72,11 @@ extern enum_name_t *hash_algorithm_names;
  * Short names for hash_algorithm_names
  */
 extern enum_name_t *hash_algorithm_short_names;
+
+/**
+ * Uppercase short names for hash_algorithm_names
+ */
+extern enum_name_t *hash_algorithm_short_names_upper;
 
 /**
  * Generic interface for all hash functions.
@@ -127,6 +133,14 @@ struct hasher_t {
 	 */
 	void (*destroy)(hasher_t *this);
 };
+
+/**
+ * Returns the size of the hash for the given algorithm.
+ *
+ * @param alg			hash algorithm
+ * @return				size of hash or 0 if unknown
+ */
+size_t hasher_hash_size(hash_algorithm_t alg);
 
 /**
  * Conversion of ASN.1 OID to hash algorithm.
@@ -197,8 +211,10 @@ int hasher_signature_algorithm_to_oid(hash_algorithm_t alg, key_type_t key);
  * Determine the hash algorithm associated with a given signature scheme.
  *
  * @param scheme		signature scheme
+ * @param params		optional parameters
  * @return				hash algorithm (could be HASH_UNKNOWN)
  */
-hash_algorithm_t hasher_from_signature_scheme(signature_scheme_t scheme);
+hash_algorithm_t hasher_from_signature_scheme(signature_scheme_t scheme,
+											  void *params);
 
 #endif /** HASHER_H_ @}*/

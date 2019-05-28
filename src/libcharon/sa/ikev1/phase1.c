@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2012 Tobias Brunner
- * Hochschule fuer Technik Rapperswil
+ * Copyright (C) 2012-2017 Tobias Brunner
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * Copyright (C) 2012 Martin Willi
  * Copyright (C) 2012 revosec AG
@@ -102,6 +102,31 @@ static auth_cfg_t *get_auth_cfg(peer_cfg_t *peer_cfg, bool local)
 }
 
 /**
+ * Find a shared key for the given identities
+ */
+static shared_key_t *find_shared_key(identification_t *my_id, host_t *me,
+									 identification_t *other_id, host_t *other)
+{
+	identification_t *any_id = NULL;
+	shared_key_t *shared_key;
+
+	if (!other_id)
+	{
+		any_id = identification_create_from_encoding(ID_ANY, chunk_empty);
+		other_id = any_id;
+	}
+	shared_key = lib->credmgr->get_shared(lib->credmgr, SHARED_IKE,
+										  my_id, other_id);
+	if (!shared_key)
+	{
+		DBG1(DBG_IKE, "no shared key found for '%Y'[%H] - '%Y'[%H]",
+			 my_id, me, other_id, other);
+	}
+	DESTROY_IF(any_id);
+	return shared_key;
+}
+
+/**
  * Lookup a shared secret for this IKE_SA
  */
 static shared_key_t *lookup_shared_key(private_phase1_t *this,
@@ -113,22 +138,8 @@ static shared_key_t *lookup_shared_key(private_phase1_t *this,
 	auth_cfg_t *my_auth, *other_auth;
 	enumerator_t *enumerator;
 
-	/* try to get a PSK for IP addresses */
 	me = this->ike_sa->get_my_host(this->ike_sa);
 	other = this->ike_sa->get_other_host(this->ike_sa);
-	my_id = identification_create_from_sockaddr(me->get_sockaddr(me));
-	other_id = identification_create_from_sockaddr(other->get_sockaddr(other));
-	if (my_id && other_id)
-	{
-		shared_key = lib->credmgr->get_shared(lib->credmgr, SHARED_IKE,
-											  my_id, other_id);
-	}
-	DESTROY_IF(my_id);
-	DESTROY_IF(other_id);
-	if (shared_key)
-	{
-		return shared_key;
-	}
 
 	if (peer_cfg)
 	{	/* as initiator or aggressive responder, use identities */
@@ -145,50 +156,53 @@ static shared_key_t *lookup_shared_key(private_phase1_t *this,
 			{
 				other_id = other_auth->get(other_auth, AUTH_RULE_IDENTITY);
 			}
-			if (my_id && other_id)
-			{
-				shared_key = lib->credmgr->get_shared(lib->credmgr, SHARED_IKE,
-													  my_id, other_id);
-				if (!shared_key)
-				{
-					DBG1(DBG_IKE, "no shared key found for '%Y'[%H] - '%Y'[%H]",
-						 my_id, me, other_id, other);
-				}
-			}
-		}
-		return shared_key;
-	}
-	/* as responder, we try to find a config by IP */
-	enumerator = charon->backends->create_peer_cfg_enumerator(charon->backends,
-												me, other, NULL, NULL, IKEV1);
-	while (enumerator->enumerate(enumerator, &peer_cfg))
-	{
-		my_auth = get_auth_cfg(peer_cfg, TRUE);
-		other_auth = get_auth_cfg(peer_cfg, FALSE);
-		if (my_auth && other_auth)
-		{
-			my_id = my_auth->get(my_auth, AUTH_RULE_IDENTITY);
-			other_id = other_auth->get(other_auth, AUTH_RULE_IDENTITY);
 			if (my_id)
 			{
-				shared_key = lib->credmgr->get_shared(lib->credmgr, SHARED_IKE,
-													  my_id, other_id);
-				if (shared_key)
-				{
-					break;
-				}
-				else
-				{
-					DBG1(DBG_IKE, "no shared key found for '%Y'[%H] - '%Y'[%H]",
-						 my_id, me, other_id, other);
-				}
+				shared_key = find_shared_key(my_id, me, other_id, other);
 			}
 		}
 	}
-	enumerator->destroy(enumerator);
+	else
+	{	/* as responder, we try to find a config by IP addresses and use the
+		 * configured identities to find the PSK */
+		enumerator = charon->backends->create_peer_cfg_enumerator(
+								charon->backends, me, other, NULL, NULL, IKEV1);
+		while (enumerator->enumerate(enumerator, &peer_cfg))
+		{
+			my_auth = get_auth_cfg(peer_cfg, TRUE);
+			other_auth = get_auth_cfg(peer_cfg, FALSE);
+			if (my_auth && other_auth)
+			{
+				my_id = my_auth->get(my_auth, AUTH_RULE_IDENTITY);
+				other_id = other_auth->get(other_auth, AUTH_RULE_IDENTITY);
+				if (my_id)
+				{
+					shared_key = find_shared_key(my_id, me, other_id, other);
+					if (shared_key)
+					{
+						break;
+					}
+				}
+			}
+		}
+		enumerator->destroy(enumerator);
+	}
 	if (!shared_key)
-	{
-		DBG1(DBG_IKE, "no shared key found for %H - %H", me, other);
+	{	/* try to get a PSK for IP addresses */
+		my_id = identification_create_from_sockaddr(me->get_sockaddr(me));
+		other_id = identification_create_from_sockaddr(
+													other->get_sockaddr(other));
+		if (my_id && other_id)
+		{
+			shared_key = lib->credmgr->get_shared(lib->credmgr, SHARED_IKE,
+												  my_id, other_id);
+		}
+		DESTROY_IF(my_id);
+		DESTROY_IF(other_id);
+		if (!shared_key)
+		{
+			DBG1(DBG_IKE, "no shared key found for %H - %H", me, other);
+		}
 	}
 	return shared_key;
 }
@@ -237,7 +251,8 @@ METHOD(phase1_t, derive_keys, bool,
 		return FALSE;
 	}
 	charon->bus->ike_keys(charon->bus, this->ike_sa, this->dh, this->dh_value,
-						  this->nonce_i, this->nonce_r, NULL, shared_key);
+						  this->nonce_i, this->nonce_r, NULL, shared_key,
+						  method);
 	DESTROY_IF(shared_key);
 	return TRUE;
 }
@@ -297,7 +312,7 @@ static void save_auth_cfg(private_phase1_t *this,
 		return;
 	}
 	auth = auth_cfg_create();
-	/* for local config, we _copy_ entires from the config, as it contains
+	/* for local config, we _copy_ entries from the config, as it contains
 	 * certificates we must send later. */
 	auth->merge(auth, this->ike_sa->get_auth_cfg(this->ike_sa, local), local);
 	this->ike_sa->add_auth_cfg(this->ike_sa, local, auth);

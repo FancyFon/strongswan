@@ -1,5 +1,9 @@
 SUBDIRS = src man conf init testing
 
+if USE_FUZZING
+  SUBDIRS += fuzz
+endif
+
 if USE_SCRIPTS
   SUBDIRS += scripts
 endif
@@ -19,6 +23,11 @@ if USE_DEV_HEADERS
 config_includedir = $(ipseclibdir)/include
 nodist_config_include_HEADERS = config.h
 endif
+
+# we can't (and shouldn't) install/uninstall system files during make distcheck,
+# so override the autodetected path for systemd units
+AM_DISTCHECK_CONFIGURE_FLAGS = \
+	--with-systemdsystemunitdir='$$(prefix)/lib/systemd/system'
 
 # we leave config files behind intentionally so prevent distcheck from complaining
 distuninstallcheck_listfiles = find . -type f \! -name '*.conf' \! -name '*.secrets' -print
@@ -54,8 +63,8 @@ cov-report:
 		@mkdir $(top_builddir)/coverage
 		lcov -c -o $(top_builddir)/coverage/coverage.info -d $(top_builddir) \
 			 --rc lcov_branch_coverage=1
-		lcov -r $(top_builddir)/coverage/coverage.info '*/tests/*' \
-			 -o $(top_builddir)/coverage/coverage.cleaned.info \
+		lcov -r $(top_builddir)/coverage/coverage.info '*/tests/*' '*/suites/*' '/usr*' \
+			 -o $(abs_top_builddir)/coverage/coverage.cleaned.info \
 			 --rc lcov_branch_coverage=1
 		genhtml --num-spaces 4 --legend --branch-coverage --ignore-errors source \
 				-t "$(PACKAGE_STRING)" \

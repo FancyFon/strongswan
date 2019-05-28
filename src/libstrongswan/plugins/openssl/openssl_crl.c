@@ -1,4 +1,7 @@
 /*
+ * Copyright (C) 2017 Tobias Brunner
+ * HSR Hochschule fuer Technik Rapperswil
+ *
  * Copyright (C) 2010 Martin Willi
  * Copyright (C) 2010 revosec AG
  *
@@ -47,14 +50,16 @@
 #include <credentials/certificates/x509.h>
 
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
-static inline void X509_CRL_get0_signature(ASN1_BIT_STRING **psig, X509_ALGOR **palg, const X509_CRL *crl) {
+static inline void X509_CRL_get0_signature(const X509_CRL *crl, ASN1_BIT_STRING **psig, X509_ALGOR **palg) {
 	if (psig) { *psig = crl->signature; }
 	if (palg) { *palg = crl->sig_alg; }
 }
 #define X509_REVOKED_get0_serialNumber(r) ({ (r)->serialNumber; })
 #define X509_REVOKED_get0_revocationDate(r) ({ (r)->revocationDate; })
 #define X509_CRL_get0_extensions(c) ({ (c)->crl->extensions; })
-#define X509_ALGOR_get0(oid, ppt, ppv, alg) ({ *(oid) = (alg)->algorithm; })
+#define ASN1_STRING_get0_data(a) ASN1_STRING_data(a)
+#define X509_CRL_get0_lastUpdate(c) X509_CRL_get_lastUpdate(c)
+#define X509_CRL_get0_nextUpdate(c) X509_CRL_get_nextUpdate(c)
 #endif
 
 typedef struct private_openssl_crl_t private_openssl_crl_t;
@@ -85,6 +90,16 @@ struct private_openssl_crl_t {
 	chunk_t serial;
 
 	/**
+	 * Number of base CRL (deltaCrlIndicator), if a delta CRL
+	 */
+	chunk_t base;
+
+	/**
+	 * List of Freshest CRL distribution points
+	 */
+	linked_list_t *crl_uris;
+
+	/**
 	 * AuthorityKeyIdentifier of the issuing CA
 	 */
 	chunk_t authKeyIdentifier;
@@ -107,7 +122,7 @@ struct private_openssl_crl_t {
 	/**
 	 * Signature scheme used in this CRL
 	 */
-	signature_scheme_t scheme;
+	signature_params_t *scheme;
 
 	/**
 	 * References to this CRL
@@ -140,10 +155,21 @@ typedef struct {
 	int i;
 } crl_enumerator_t;
 
+/**
+ * from openssl_x509
+ */
+bool openssl_parse_crlDistributionPoints(X509_EXTENSION *ext,
+										 linked_list_t *list);
 
 METHOD(enumerator_t, crl_enumerate, bool,
-	crl_enumerator_t *this, chunk_t *serial, time_t *date, crl_reason_t *reason)
+	crl_enumerator_t *this, va_list args)
 {
+	crl_reason_t *reason;
+	chunk_t *serial;
+	time_t *date;
+
+	VA_ARGS_VGET(args, serial, date, reason);
+
 	if (this->i < this->num)
 	{
 		X509_REVOKED *revoked;
@@ -170,7 +196,7 @@ METHOD(enumerator_t, crl_enumerate, bool,
 				if (ASN1_STRING_type(crlrsn) == V_ASN1_ENUMERATED &&
 					ASN1_STRING_length(crlrsn) == 1)
 				{
-					*reason = *ASN1_STRING_data(crlrsn);
+					*reason = *ASN1_STRING_get0_data(crlrsn);
 				}
 				ASN1_STRING_free(crlrsn);
 			}
@@ -188,7 +214,8 @@ METHOD(crl_t, create_enumerator, enumerator_t*,
 
 	INIT(enumerator,
 		.public = {
-			.enumerate = (void*)_crl_enumerate,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _crl_enumerate,
 			.destroy = (void*)free,
 		},
 		.stack = X509_CRL_get_REVOKED(this->crl),
@@ -206,6 +233,26 @@ METHOD(crl_t, get_serial, chunk_t,
 	private_openssl_crl_t *this)
 {
 	return this->serial;
+}
+
+METHOD(crl_t, is_delta_crl, bool,
+	private_openssl_crl_t *this, chunk_t *base_crl)
+{
+	if (this->base.len)
+	{
+		if (base_crl)
+		{
+			*base_crl = this->base;
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+METHOD(crl_t, create_delta_crl_uri_enumerator, enumerator_t*,
+	private_openssl_crl_t *this)
+{
+	return this->crl_uris->create_enumerator(this->crl_uris);
 }
 
 METHOD(crl_t, get_authKeyIdentifier, chunk_t,
@@ -239,12 +286,16 @@ METHOD(certificate_t, has_subject_or_issuer, id_match_t,
 
 METHOD(certificate_t, issued_by, bool,
 	private_openssl_crl_t *this, certificate_t *issuer,
-	signature_scheme_t *scheme)
+	signature_params_t **scheme)
 {
 	chunk_t fingerprint, tbs;
 	public_key_t *key;
 	x509_t *x509;
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	const ASN1_BIT_STRING *sig;
+#else
 	ASN1_BIT_STRING *sig;
+#endif
 	bool valid;
 
 	if (issuer->get_type(issuer) != CERT_X509)
@@ -276,23 +327,20 @@ METHOD(certificate_t, issued_by, bool,
 			return FALSE;
 		}
 	}
-	if (this->scheme == SIGN_UNKNOWN)
-	{
-		return FALSE;
-	}
 	/* i2d_re_X509_CRL_tbs() was added with 1.1.0 when X509_CRL became opaque */
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
 	tbs = openssl_i2chunk(re_X509_CRL_tbs, this->crl);
 #else
 	tbs = openssl_i2chunk(X509_CRL_INFO, this->crl->crl);
 #endif
-	X509_CRL_get0_signature(&sig, NULL, this->crl);
-	valid = key->verify(key, this->scheme, tbs, openssl_asn1_str2chunk(sig));
+	X509_CRL_get0_signature(this->crl, &sig, NULL);
+	valid = key->verify(key, this->scheme->scheme, this->scheme->params, tbs,
+						openssl_asn1_str2chunk(sig));
 	free(tbs.ptr);
 	key->destroy(key);
 	if (valid && scheme)
 	{
-		*scheme = this->scheme;
+		*scheme = signature_params_clone(this->scheme);
 	}
 	return valid;
 }
@@ -317,7 +365,7 @@ METHOD(certificate_t, get_validity, bool,
 	{
 		*not_after = this->nextUpdate;
 	}
-	return t <= this->nextUpdate;
+	return (t >= this->thisUpdate && t <= this->nextUpdate);
 }
 
 METHOD(certificate_t, get_encoding, bool,
@@ -372,8 +420,12 @@ METHOD(certificate_t, destroy, void,
 		{
 			X509_CRL_free(this->crl);
 		}
+		signature_params_destroy(this->scheme);
+		this->crl_uris->destroy_function(this->crl_uris,
+										 (void*)x509_cdp_destroy);
 		DESTROY_IF(this->issuer);
 		free(this->authKeyIdentifier.ptr);
+		free(this->base.ptr);
 		free(this->serial.ptr);
 		free(this->encoding.ptr);
 		free(this);
@@ -406,11 +458,12 @@ static private_openssl_crl_t *create_empty()
 				},
 				.get_serial = _get_serial,
 				.get_authKeyIdentifier = _get_authKeyIdentifier,
-				.is_delta_crl = (void*)return_false,
-				.create_delta_crl_uri_enumerator = (void*)enumerator_create_empty,
+				.is_delta_crl = _is_delta_crl,
+				.create_delta_crl_uri_enumerator = _create_delta_crl_uri_enumerator,
 				.create_enumerator = _create_enumerator,
 			},
 		},
+		.crl_uris = linked_list_create(),
 		.ref = 1,
 	);
 	return this;
@@ -437,21 +490,19 @@ static bool parse_authKeyIdentifier_ext(private_openssl_crl_t *this,
 }
 
 /**
- * Parse the crlNumber extension
+ * Quick and dirty INTEGER unwrap for crlNumber/deltaCrlIndicator extensions
  */
-static bool parse_crlNumber_ext(private_openssl_crl_t *this,
-								X509_EXTENSION *ext)
+static bool parse_integer_ext(X509_EXTENSION *ext, chunk_t *out)
 {
 	chunk_t chunk;
 
 	chunk = openssl_asn1_str2chunk(X509_EXTENSION_get_data(ext));
-	/* quick and dirty INTEGER unwrap */
 	if (chunk.len > 1 && chunk.ptr[0] == V_ASN1_INTEGER &&
 		chunk.ptr[1] == chunk.len - 2)
 	{
 		chunk = chunk_skip(chunk, 2);
-		free(this->serial.ptr);
-		this->serial = chunk_clone(chunk);
+		free(out->ptr);
+		*out = chunk_clone(chunk);
 		return TRUE;
 	}
 	return FALSE;
@@ -465,7 +516,7 @@ static bool parse_extensions(private_openssl_crl_t *this)
 	bool ok;
 	int i, num;
 	X509_EXTENSION *ext;
-	STACK_OF(X509_EXTENSION) *extensions;
+	const STACK_OF(X509_EXTENSION) *extensions;
 
 	extensions = X509_CRL_get0_extensions(this->crl);
 	if (extensions)
@@ -481,7 +532,13 @@ static bool parse_extensions(private_openssl_crl_t *this)
 					ok = parse_authKeyIdentifier_ext(this, ext);
 					break;
 				case NID_crl_number:
-					ok = parse_crlNumber_ext(this, ext);
+					ok = parse_integer_ext(ext, &this->serial);
+					break;
+				case NID_delta_crl:
+					ok = parse_integer_ext(ext, &this->base);
+					break;
+				case NID_freshest_crl:
+					ok = openssl_parse_crlDistributionPoints(ext, this->crl_uris);
 					break;
 				case NID_issuing_distribution_point:
 					/* TODO support of IssuingDistributionPoints */
@@ -513,8 +570,12 @@ static bool parse_extensions(private_openssl_crl_t *this)
 static bool parse_crl(private_openssl_crl_t *this)
 {
 	const unsigned char *ptr = this->encoding.ptr;
-	ASN1_OBJECT *oid;
+	chunk_t sig_scheme;
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	const X509_ALGOR *alg;
+#else
 	X509_ALGOR *alg;
+#endif
 
 	this->crl = d2i_X509_CRL(NULL, &ptr, this->encoding.len);
 	if (!this->crl)
@@ -522,36 +583,24 @@ static bool parse_crl(private_openssl_crl_t *this)
 		return FALSE;
 	}
 
-	X509_CRL_get0_signature(NULL, &alg, this->crl);
-	X509_ALGOR_get0(&oid, NULL, NULL, alg);
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-	if (!chunk_equals(
-			openssl_asn1_obj2chunk(this->crl->crl->sig_alg->algorithm),
-			openssl_asn1_obj2chunk(this->crl->sig_alg->algorithm)))
+	X509_CRL_get0_signature(this->crl, NULL, &alg);
+	sig_scheme = openssl_i2chunk(X509_ALGOR, (X509_ALGOR*)alg);
+	INIT(this->scheme);
+	if (!signature_params_parse(sig_scheme, 0, this->scheme))
 	{
+		DBG1(DBG_ASN, "unable to parse signature algorithm");
+		free(sig_scheme.ptr);
 		return FALSE;
 	}
-#elif 0
-	/* FIXME: we currently can't do this if X509_CRL is opaque (>= 1.1.0) as
-	 * X509_CRL_get0_tbs_sigalg() does not exist and there does not seem to be
-	 * another easy way to get the algorithm from the tbsCertList of the CRL */
-	alg = X509_CRL_get0_tbs_sigalg(this->crl);
-	X509_ALGOR_get0(&oid_tbs, NULL, NULL, alg);
-	if (!chunk_equals(openssl_asn1_obj2chunk(oid),
-					  openssl_asn1_obj2chunk(oid_tbs)))
-	{
-		return FALSE;
-	}
-#endif
-	this->scheme = signature_scheme_from_oid(openssl_asn1_known_oid(oid));
+	free(sig_scheme.ptr);
 
 	this->issuer = openssl_x509_name2id(X509_CRL_get_issuer(this->crl));
 	if (!this->issuer)
 	{
 		return FALSE;
 	}
-	this->thisUpdate = openssl_asn1_to_time(X509_CRL_get_lastUpdate(this->crl));
-	this->nextUpdate = openssl_asn1_to_time(X509_CRL_get_nextUpdate(this->crl));
+	this->thisUpdate = openssl_asn1_to_time(X509_CRL_get0_lastUpdate(this->crl));
+	this->nextUpdate = openssl_asn1_to_time(X509_CRL_get0_nextUpdate(this->crl));
 
 	return parse_extensions(this);
 }

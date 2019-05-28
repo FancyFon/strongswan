@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2015 Tobias Brunner
- * Hochschule fuer Technik Rapperswil
+ * Copyright (C) 2015-2018 Tobias Brunner
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * Copyright (C) 2012 Martin Willi
  * Copyright (C) 2012 revosec AG
@@ -17,6 +17,7 @@
  */
 
 #include "eap_radius_accounting.h"
+#include "eap_radius_provider.h"
 #include "eap_radius_plugin.h"
 
 #include <time.h>
@@ -160,6 +161,8 @@ typedef struct {
 	ike_sa_id_t *id;
 	/** RADIUS accounting session ID */
 	char sid[24];
+	/** cached Class attributes */
+	array_t *class_attrs;
 	/** number of sent/received octets/packets for expired SAs */
 	usage_t usage;
 	/** list of cached SAs, sa_entry_t (sorted by their unique ID) */
@@ -186,6 +189,7 @@ static void destroy_entry(entry_t *this)
 {
 	array_destroy_function(this->cached, (void*)free, NULL);
 	array_destroy_function(this->migrated, (void*)free, NULL);
+	array_destroy_function(this->class_attrs, (void*)chunk_free, NULL);
 	this->id->destroy(this->id);
 	free(this);
 }
@@ -458,6 +462,54 @@ static void add_ike_sa_parameters(private_eap_radius_accounting_t *this,
 }
 
 /**
+ * Add any unclaimed IP addresses to the message
+ */
+static void add_unclaimed_ips(radius_message_t *message, ike_sa_t *ike_sa)
+{
+	eap_radius_provider_t *provider;
+	enumerator_t *enumerator;
+	host_t *vip;
+
+	provider = eap_radius_provider_get();
+	enumerator = provider->clear_unclaimed(provider,
+										   ike_sa->get_unique_id(ike_sa));
+	while (enumerator->enumerate(enumerator, &vip))
+	{
+		switch (vip->get_family(vip))
+		{
+			case AF_INET:
+				message->add(message, RAT_FRAMED_IP_ADDRESS,
+							 vip->get_address(vip));
+				break;
+			case AF_INET6:
+				message->add(message, RAT_FRAMED_IPV6_ADDRESS,
+							 vip->get_address(vip));
+				break;
+			default:
+				break;
+		}
+	}
+	enumerator->destroy(enumerator);
+}
+
+/**
+ * Add the Class attributes received in the Access-Accept message to the
+ * RADIUS accounting message
+ */
+static void add_class_attributes(radius_message_t *message, entry_t *entry)
+{
+	enumerator_t *enumerator;
+	chunk_t *cls;
+
+	enumerator = array_create_enumerator(entry->class_attrs);
+	while (enumerator->enumerate(enumerator, &cls))
+	{
+		message->add(message, RAT_CLASS, *cls);
+	}
+	enumerator->destroy(enumerator);
+}
+
+/**
  * Get an existing or create a new entry from the locked session table
  */
 static entry_t* get_or_create_entry(private_eap_radius_accounting_t *this,
@@ -477,7 +529,7 @@ static entry_t* get_or_create_entry(private_eap_radius_accounting_t *this,
 			.interim = {
 				.last = now,
 			},
-			/* default terminate cause, if none other catched */
+			/* default terminate cause, if none other caught */
 			.cause = ACCT_CAUSE_USER_REQUEST,
 		);
 		snprintf(entry->sid, sizeof(entry->sid), "%u-%u", this->prefix, unique);
@@ -585,6 +637,7 @@ static job_requeue_t send_interim(interim_data_t *data)
 		message->add(message, RAT_ACCT_STATUS_TYPE, chunk_from_thing(value));
 		message->add(message, RAT_ACCT_SESSION_ID,
 					 chunk_create(entry->sid, strlen(entry->sid)));
+		add_class_attributes(message, entry);
 		add_ike_sa_parameters(this, message, ike_sa);
 
 		value = htonl(usage.bytes.sent);
@@ -704,6 +757,7 @@ static void send_start(private_eap_radius_accounting_t *this, ike_sa_t *ike_sa)
 	message->add(message, RAT_ACCT_STATUS_TYPE, chunk_from_thing(value));
 	message->add(message, RAT_ACCT_SESSION_ID,
 				 chunk_create(entry->sid, strlen(entry->sid)));
+	add_class_attributes(message, entry);
 
 	if (!entry->interim.interval)
 	{
@@ -766,7 +820,9 @@ static void send_stop(private_eap_radius_accounting_t *this, ike_sa_t *ike_sa)
 		message->add(message, RAT_ACCT_STATUS_TYPE, chunk_from_thing(value));
 		message->add(message, RAT_ACCT_SESSION_ID,
 					 chunk_create(entry->sid, strlen(entry->sid)));
+		add_class_attributes(message, entry);
 		add_ike_sa_parameters(this, message, ike_sa);
+		add_unclaimed_ips(message, ike_sa);
 
 		value = htonl(entry->usage.bytes.sent);
 		message->add(message, RAT_ACCT_OUTPUT_OCTETS, chunk_from_thing(value));
@@ -792,7 +848,6 @@ static void send_stop(private_eap_radius_accounting_t *this, ike_sa_t *ike_sa)
 
 		value = htonl(time_monotonic(NULL) - entry->created);
 		message->add(message, RAT_ACCT_SESSION_TIME, chunk_from_thing(value));
-
 
 		value = htonl(entry->cause);
 		message->add(message, RAT_ACCT_TERMINATE_CAUSE, chunk_from_thing(value));
@@ -1047,8 +1102,27 @@ eap_radius_accounting_t *eap_radius_accounting_create()
 	return &this->public;
 }
 
-/**
- * See header
+/*
+ * Described in header
+ */
+char *eap_radius_accounting_session_id(ike_sa_t *ike_sa)
+{
+	entry_t *entry;
+	char *sid = NULL;
+
+	if (singleton)
+	{
+		singleton->mutex->lock(singleton->mutex);
+		entry = get_or_create_entry(singleton, ike_sa->get_id(ike_sa),
+									ike_sa->get_unique_id(ike_sa));
+		sid = strdup(entry->sid);
+		singleton->mutex->unlock(singleton->mutex);
+	}
+	return sid;
+}
+
+/*
+ * Described in header
  */
 void eap_radius_accounting_start_interim(ike_sa_t *ike_sa, uint32_t interval)
 {
@@ -1061,6 +1135,27 @@ void eap_radius_accounting_start_interim(ike_sa_t *ike_sa, uint32_t interval)
 		entry = get_or_create_entry(singleton, ike_sa->get_id(ike_sa),
 									ike_sa->get_unique_id(ike_sa));
 		entry->interim.interval = interval;
+		singleton->mutex->unlock(singleton->mutex);
+	}
+}
+
+/*
+ * Described in header
+ */
+void eap_radius_accounting_add_class(ike_sa_t *ike_sa, chunk_t cls)
+{
+	if (singleton)
+	{
+		entry_t *entry;
+		chunk_t clone;
+
+		DBG2(DBG_CFG, "cache RADIUS Class attribute %B", &cls);
+		singleton->mutex->lock(singleton->mutex);
+		entry = get_or_create_entry(singleton, ike_sa->get_id(ike_sa),
+									ike_sa->get_unique_id(ike_sa));
+		clone = chunk_clone(cls);
+		array_insert_create_value(&entry->class_attrs, sizeof(chunk_t),
+								  ARRAY_TAIL, &clone);
 		singleton->mutex->unlock(singleton->mutex);
 	}
 }

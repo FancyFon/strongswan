@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2012-2014 Reto Buerki
  * Copyright (C) 2012 Adrian-Ken Rueegsegger
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -101,61 +101,50 @@ static void sad_entry_destroy(sad_entry_t *entry)
 	}
 }
 
-/**
- * Find a list entry with given src, dst, (remote) spi and proto values.
- */
-static bool sad_entry_match(sad_entry_t * const entry, const host_t * const src,
-							const host_t * const dst, const uint32_t * const spi,
-							const uint8_t * const proto)
+CALLBACK(sad_entry_match, bool,
+	sad_entry_t * const entry, va_list args)
 {
-	if (entry->src == NULL || entry->dst == NULL)
+	const host_t *src, *dst;
+	const uint32_t *spi;
+	const uint8_t *proto;
+	const bool *local;
+
+	VA_ARGS_VGET(args, src, dst, spi, proto, local);
+
+	if (entry->src == NULL || entry->dst == NULL || entry->proto != *proto)
 	{
 		return FALSE;
 	}
-
-	return src->ip_equals(entry->src, (host_t *)src) &&
-		   dst->ip_equals(entry->dst, (host_t *)dst) &&
-		   entry->spi_rem == *spi && entry->proto == *proto;
+	if (*local)
+	{
+		return entry->src->ip_equals(entry->src, (host_t *)dst) &&
+			   entry->dst->ip_equals(entry->dst, (host_t *)src) &&
+			   entry->spi_loc == *spi;
+	}
+	return entry->src->ip_equals(entry->src, (host_t *)src) &&
+		   entry->dst->ip_equals(entry->dst, (host_t *)dst) &&
+		   entry->spi_rem == *spi;
 }
 
-/**
- * Find a list entry with given reqid, spi and proto values.
- */
-static bool sad_entry_match_dst(sad_entry_t * const entry,
-								const uint32_t * const reqid,
-								const uint32_t * const spi,
-								const uint8_t * const proto)
+CALLBACK(sad_entry_match_dst, bool,
+	sad_entry_t * const entry, va_list args)
 {
+	const uint32_t *reqid, *spi;
+	const uint8_t *proto;
+
+	VA_ARGS_VGET(args, reqid, spi, proto);
 	return entry->reqid   == *reqid &&
 		   entry->spi_rem == *spi   &&
 		   entry->proto   == *proto;
 }
 
-/**
- * Find a list entry with given esa id.
- */
-static bool sad_entry_match_esa_id(sad_entry_t * const entry,
-								   const esa_id_type * const esa_id)
+CALLBACK(sad_entry_equal, bool,
+	sad_entry_t * const left, va_list args)
 {
-	return entry->esa_id == *esa_id;
-}
+	sad_entry_t *right;
 
-/**
- * Find a list entry with given reqid and different esa id.
- */
-static bool sad_entry_match_other_esa(sad_entry_t * const entry,
-									  const esa_id_type * const esa_id,
-									  const uint32_t * const reqid)
-{
-	return entry->reqid  == *reqid &&
-		   entry->esa_id != *esa_id;
-}
+	VA_ARGS_VGET(args, right);
 
-/**
- * Compare two SAD entries for equality.
- */
-static bool sad_entry_equal(sad_entry_t * const left, sad_entry_t * const right)
-{
 	if (left->src == NULL || left->dst == NULL || right->src == NULL ||
 		right->dst == NULL)
 	{
@@ -175,8 +164,8 @@ METHOD(tkm_kernel_sad_t, insert, bool,
 	const uint32_t reqid, const host_t * const src, const host_t * const dst,
 	const uint32_t spi_loc, const uint32_t spi_rem, const uint8_t proto)
 {
-	status_t result;
 	sad_entry_t *new_entry;
+	bool found;
 
 	INIT(new_entry,
 		 .esa_id = esa_id,
@@ -189,10 +178,9 @@ METHOD(tkm_kernel_sad_t, insert, bool,
 	);
 
 	this->mutex->lock(this->mutex);
-	result = this->data->find_first(this->data,
-									(linked_list_match_t)sad_entry_equal, NULL,
+	found = this->data->find_first(this->data, sad_entry_equal, NULL,
 									new_entry);
-	if (result == NOT_FOUND)
+	if (!found)
 	{
 		DBG3(DBG_KNL, "inserting SAD entry (esa: %llu, reqid: %u, src: %H, "
 			 "dst: %H, spi_loc: %x, spi_rem: %x,proto: %u)", esa_id, reqid, src,
@@ -207,67 +195,32 @@ METHOD(tkm_kernel_sad_t, insert, bool,
 		free(new_entry);
 	}
 	this->mutex->unlock(this->mutex);
-	return result == NOT_FOUND;
+	return !found;
 }
 
 METHOD(tkm_kernel_sad_t, get_esa_id, esa_id_type,
 	private_tkm_kernel_sad_t * const this, const host_t * const src,
-	const host_t * const dst, const uint32_t spi, const uint8_t proto)
+	const host_t * const dst, const uint32_t spi, const uint8_t proto,
+	const bool local)
 {
 	esa_id_type id = 0;
 	sad_entry_t *entry = NULL;
 
 	this->mutex->lock(this->mutex);
-	const status_t res = this->data->find_first(this->data,
-												(linked_list_match_t)sad_entry_match,
-												(void**)&entry, src, dst, &spi,
-												&proto);
-	if (res == SUCCESS && entry)
+	const bool res = this->data->find_first(this->data, sad_entry_match,
+											(void**)&entry, src, dst, &spi,
+											&proto, &local);
+	if (res && entry)
 	{
 		id = entry->esa_id;
 		DBG3(DBG_KNL, "returning ESA id %llu of SAD entry (src: %H, dst: %H, "
-			 "spi: %x, proto: %u)", id, src, dst, ntohl(spi), proto);
+			 "%sbound spi: %x, proto: %u)", id, src, dst, local ? "in" : "out",
+			 ntohl(spi), proto);
 	}
 	else
 	{
-		DBG3(DBG_KNL, "no SAD entry found for src %H, dst %H, spi %x, proto %u",
-			 src, dst, ntohl(spi), proto);
-	}
-	this->mutex->unlock(this->mutex);
-	return id;
-}
-
-METHOD(tkm_kernel_sad_t, get_other_esa_id, esa_id_type,
-	private_tkm_kernel_sad_t * const this, const esa_id_type esa_id)
-{
-	esa_id_type id = 0;
-	sad_entry_t *entry = NULL;
-	uint32_t reqid;
-	status_t res;
-
-	this->mutex->lock(this->mutex);
-	res = this->data->find_first(this->data,
-								 (linked_list_match_t)sad_entry_match_esa_id,
-								 (void**)&entry, &esa_id);
-	if (res == SUCCESS && entry)
-	{
-		reqid = entry->reqid;
-	}
-	else
-	{
-		DBG3(DBG_KNL, "no SAD entry found for ESA id %llu", esa_id);
-		this->mutex->unlock(this->mutex);
-		return id;
-	}
-
-	res = this->data->find_first(this->data,
-								 (linked_list_match_t)sad_entry_match_other_esa,
-								 (void**)&entry, &esa_id, &reqid);
-	if (res == SUCCESS && entry)
-	{
-		id = entry->esa_id;
-		DBG3(DBG_KNL, "returning ESA id %llu of other SAD entry with reqid %u",
-			 id, reqid);
+		DBG3(DBG_KNL, "no SAD entry found for src %H, dst %H, %sbound spi %x, "
+			 "proto %u", src, dst, local ? "in" : "out", ntohl(spi), proto);
 	}
 	this->mutex->unlock(this->mutex);
 	return id;
@@ -281,12 +234,11 @@ METHOD(tkm_kernel_sad_t, get_dst_host, host_t *,
 	sad_entry_t *entry = NULL;
 
 	this->mutex->lock(this->mutex);
-	const status_t res = this->data->find_first(this->data,
-												(linked_list_match_t)sad_entry_match_dst,
-												(void**)&entry, &reqid, &spi, &proto);
-	if (res == SUCCESS && entry)
+	const bool res = this->data->find_first(this->data, sad_entry_match_dst,
+											(void**)&entry, &reqid, &spi, &proto);
+	if (res && entry)
 	{
-		dst = entry->dst;
+		dst = entry->dst->clone(entry->dst);
 		DBG3(DBG_KNL, "returning destination host %H of SAD entry (reqid: %u,"
 			 " spi: %x, proto: %u)", dst, reqid, ntohl(spi), proto);
 	}
@@ -353,7 +305,6 @@ tkm_kernel_sad_t *tkm_kernel_sad_create()
 		.public = {
 			.insert = _insert,
 			.get_esa_id = _get_esa_id,
-			.get_other_esa_id = _get_other_esa_id,
 			.get_dst_host = _get_dst_host,
 			.remove = __remove,
 			.destroy = _destroy,

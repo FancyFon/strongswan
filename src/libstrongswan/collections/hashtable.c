@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2008-2014 Tobias Brunner
- * Hochschule fuer Technik Rapperswil
+ * HSR Hochschule fuer Technik Rapperswil
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the
@@ -379,8 +379,13 @@ METHOD(hashtable_t, get_count, u_int,
 }
 
 METHOD(enumerator_t, enumerate, bool,
-	private_enumerator_t *this, const void **key, void **value)
+	private_enumerator_t *this, va_list args)
 {
+	const void **key;
+	void **value;
+
+	VA_ARGS_VGET(args, key, value);
+
 	while (this->count && this->row < this->table->capacity)
 	{
 		this->prev = this->current;
@@ -417,7 +422,8 @@ METHOD(hashtable_t, create_enumerator, enumerator_t*,
 
 	INIT(enumerator,
 		.enumerator = {
-			.enumerate = (void*)_enumerate,
+			.enumerate = enumerator_enumerate_default,
+			.venumerate = _enumerate,
 			.destroy = (void*)free,
 		},
 		.table = this,
