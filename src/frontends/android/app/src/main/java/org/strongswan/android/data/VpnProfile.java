@@ -51,6 +51,7 @@ public class VpnProfile implements Cloneable
 	private VpnType mVpnType;
 	private UUID mUUID;
 	private long mId = -1;
+	private  boolean byYubikey;
 
 	private String mCertificateId;
 	private ArrayList<String> allowedApplications = new ArrayList<String>();
@@ -358,6 +359,14 @@ public class VpnProfile implements Cloneable
 		this.mLoggingLevel = mLoggingLevel;
 	}
 
+	public boolean isByYubikey() {
+		return byYubikey;
+	}
+
+	public void setByYubikey(boolean byYubikey) {
+		this.byYubikey = byYubikey;
+	}
+
 	public Bundle toBundle(Resources resources) {
 		Bundle bundle = new Bundle();
 		bundle.putLong(resources.getString(R.string.vpn_profile_bundle_id_key), getId());
@@ -371,6 +380,7 @@ public class VpnProfile implements Cloneable
 		bundle.putString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key), getCertificateId());
 		bundle.putStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications), getAllowedApplications());
 		bundle.putInt(resources.getString(R.string.vpn_profile_bundle_logging_level),getLoggingLevel());
+		bundle.putBoolean(resources.getString(R.string.vpn_profile_bundle_by_yubikey), isByYubikey());
 		return bundle;
 	}
 
@@ -386,6 +396,7 @@ public class VpnProfile implements Cloneable
 		mCertificateId = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key));
 		allowedApplications = bundle.getStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications));
 		mLoggingLevel = bundle.getInt(resources.getString(R.string.vpn_profile_bundle_logging_level), DEFAULT_LOGGING_LEVEL);
+		byYubikey = bundle.getBoolean(resources.getString(R.string.vpn_profile_bundle_by_yubikey), false);
 	}
 
 	@Override

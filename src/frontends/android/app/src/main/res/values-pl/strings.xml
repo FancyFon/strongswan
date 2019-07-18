@@ -28,6 +28,8 @@
     <string name="vpn_not_supported_no_permission">Unable to get permission to create VPN connections. Either because it was denied by the user, or because a different VPN app has the always-on feature enabled.</string>
     <string name="loading">Wczytywanie&#8230;</string>
     <string name="profile_not_found">Nie znaleziono profilu</string>
+    <string name="yubikey_profile_not_found">Nie znaleziono profilu dla Yubikey</string>
+    <string name="yubikey_not_recognized">Yubikey nierozpoznany</string>
     <string name="strongswan_shortcut">Skrót strongSwan</string>
     <string name="permanent_notification_name">VPN connection state</string>
     <string name="permanent_notification_description">Provides information about the VPN connection state and serves as permanent notification to keep the VPN service running in the background.</string>

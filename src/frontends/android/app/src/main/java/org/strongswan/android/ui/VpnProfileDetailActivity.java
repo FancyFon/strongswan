@@ -17,6 +17,7 @@
 
 package org.strongswan.android.ui;
 
+import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -45,6 +46,7 @@ import android.view.MenuItem;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.AdapterView;
 import android.widget.AdapterView.OnItemSelectedListener;
 import android.widget.ArrayAdapter;
@@ -58,6 +60,7 @@ import android.widget.Spinner;
 import android.widget.Switch;
 import android.widget.TextView;
 
+import org.strongswan.android.BuildConfig;
 import org.strongswan.android.R;
 import org.strongswan.android.data.VpnProfile;
 import org.strongswan.android.data.VpnProfile.SelectedAppsHandling;
@@ -359,6 +362,7 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 
 		updateCredentialView();
 		updateCertificateSelector();
+		lockFancyFonEditIfNeeded();
 		updateAdvancedSettings();
 		updateAppsSelector();
 	}
@@ -396,10 +400,34 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 	@Override
 	public boolean onCreateOptionsMenu(Menu menu)
 	{
-		MenuInflater inflater = getMenuInflater();
-		inflater.inflate(R.menu.profile_edit, menu);
+		if (BuildConfig.DEBUG) {
+			MenuInflater inflater = getMenuInflater();
+			inflater.inflate(R.menu.profile_edit, menu);
+		}
+
 		return true;
 	}
+
+    private void lockFancyFonEditIfNeeded() {
+        if(!BuildConfig.DEBUG){
+            disableFancyFonUiEditOptions();
+        }
+    }
+
+    private void disableFancyFonUiEditOptions(){
+        mPassword.setEnabled(false);
+        mUsername.setEnabled(false);
+        mGateway.setEnabled(false);
+        mName.setEnabled(false);
+        mSelectVpnType.setEnabled(false);
+        mSelectVpnType.setClickable(false);
+        mCheckAuto.setEnabled(false);
+        mCheckAuto.setChecked(false);
+		mShowAdvanced.setEnabled(false);
+		mSelectUserId.setEnabled(false);
+		mSelectCert.setOnClickListener(null);
+		mSelectUserCert.setOnClickListener(null);
+    }
 
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item)
@@ -443,6 +471,17 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 			default:
 				super.onActivityResult(requestCode, resultCode, data);
 		}
+	}
+
+	private static void hideKeyboard(Activity activity) {
+		InputMethodManager imm = (InputMethodManager) activity.getSystemService(Activity.INPUT_METHOD_SERVICE);
+		//Find the currently focused view, so we can grab the correct window token from it.
+		View view = activity.getCurrentFocus();
+		//If no view currently has focus, create a new one, just so we can grab a window token from it
+		if (view == null) {
+			view = new View(activity);
+		}
+		imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
 	}
 
 	/**
@@ -499,17 +538,19 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 	 */
 	private void showCertificateAlert()
 	{
-		AlertDialog.Builder adb = new AlertDialog.Builder(VpnProfileDetailActivity.this);
-		adb.setTitle(R.string.alert_text_nocertfound_title);
-		adb.setMessage(R.string.alert_text_nocertfound);
-		adb.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-			@Override
-			public void onClick(DialogInterface dialog, int id)
-			{
-				dialog.cancel();
-			}
-		});
-		adb.show();
+		if (BuildConfig.DEBUG) {
+			AlertDialog.Builder adb = new AlertDialog.Builder(VpnProfileDetailActivity.this);
+			adb.setTitle(R.string.alert_text_nocertfound_title);
+			adb.setMessage(R.string.alert_text_nocertfound);
+			adb.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface dialog, int id)
+				{
+					dialog.cancel();
+				}
+			});
+			adb.show();
+		}
 	}
 
 	/**
@@ -588,17 +629,21 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 	 */
 	private void updateAdvancedSettings()
 	{
-		boolean show = mShowAdvanced.isChecked();
-		if (!show && mProfile != null)
-		{
-			Integer st = mProfile.getSplitTunneling(), flags = mProfile.getFlags();
-			show = mProfile.getRemoteId() != null || mProfile.getMTU() != null ||
-				   mProfile.getPort() != null || mProfile.getNATKeepAlive() != null ||
-				   (flags != null && flags != 0) || (st != null && st != 0) ||
-				   mProfile.getIncludedSubnets() != null || mProfile.getExcludedSubnets() != null ||
-				   mProfile.getSelectedAppsHandling() != SelectedAppsHandling.SELECTED_APPS_DISABLE ||
-				   mProfile.getIkeProposal() != null || mProfile.getEspProposal() != null;
-		}
+		boolean show = false;
+		if (BuildConfig.DEBUG) {
+            show = mShowAdvanced.isChecked();
+            if (!show && mProfile != null)
+            {
+                Integer st = mProfile.getSplitTunneling(), flags = mProfile.getFlags();
+                show = mProfile.getRemoteId() != null || mProfile.getMTU() != null ||
+                        mProfile.getPort() != null || mProfile.getNATKeepAlive() != null ||
+                        (flags != null && flags != 0) || (st != null && st != 0) ||
+                        mProfile.getIncludedSubnets() != null || mProfile.getExcludedSubnets() != null ||
+                        mProfile.getSelectedAppsHandling() != SelectedAppsHandling.SELECTED_APPS_DISABLE ||
+                        mProfile.getIkeProposal() != null || mProfile.getEspProposal() != null;
+            }
+        }
+
 		mShowAdvanced.setVisibility(!show ? View.VISIBLE : View.GONE);
 		mAdvancedSettings.setVisibility(show ? View.VISIBLE : View.GONE);
 
