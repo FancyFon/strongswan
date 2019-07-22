@@ -66,6 +66,7 @@ public class VpnProfileDataSource
 	private static final String EMPTY_STRING = "";
 	private static final String SPLIT_TUNNELING_DEFAULT_VALUE = "0";
 	private static final String KEY_YUBIKEY = "yubikey";
+	private static final String KEY_EXCLUDE_PACKAGE_NAME = "exclude_package_name";
 
 	private DatabaseHelper mDbHelper;
 	private SQLiteDatabase mDatabase;
@@ -75,7 +76,7 @@ public class VpnProfileDataSource
 	private static final String TABLE_VPNPROFILE = "vpnprofile";
 	public static final String KEY_LOGGING_LEVEL="logging_level";
 
-	private static final int DATABASE_VERSION = 17;
+	private static final int DATABASE_VERSION = 18;
 
 	public static final DbColumn[] COLUMNS = new DbColumn[] {
 			new DbColumn(KEY_ID, "INTEGER PRIMARY KEY AUTOINCREMENT", 1),
@@ -105,6 +106,7 @@ public class VpnProfileDataSource
 			new DbColumn(KEY_ALLOWED_APPLICATIONS, "TEXT", 15),
 			new DbColumn(KEY_LOGGING_LEVEL, "INTEGER", 15),
 			new DbColumn(KEY_YUBIKEY, "INTEGER", 17),
+			new DbColumn(KEY_EXCLUDE_PACKAGE_NAME, "TEXT", 18),
 	};
 
 	private static final String[] ALL_COLUMNS = getColumns(DATABASE_VERSION);
@@ -260,9 +262,13 @@ public class VpnProfileDataSource
 					db.endTransaction();
 				}
 			}
-			if (oldVersion < 19) {
+			if (oldVersion < 17) {
 				db.execSQL("ALTER TABLE " + TABLE_VPNPROFILE + " ADD " + KEY_YUBIKEY +
 						" INTEGER;");
+			}
+			if (oldVersion < 18) {
+				db.execSQL("ALTER TABLE " + TABLE_VPNPROFILE + " ADD " + KEY_EXCLUDE_PACKAGE_NAME +
+						" TEXT;");
 			}
 		}
 
@@ -514,6 +520,7 @@ public class VpnProfileDataSource
 		profile.setAllowedApplications(convertFromString(cursor.getString(cursor.getColumnIndex(KEY_ALLOWED_APPLICATIONS))));
 		profile.setLoggingLevel(cursor.getInt(cursor.getColumnIndex(KEY_LOGGING_LEVEL)));
 		profile.setByYubikey(cursor.getInt(cursor.getColumnIndex(KEY_YUBIKEY))==1);
+		profile.setExcludePackageNames(cursor.getString(cursor.getColumnIndex(KEY_EXCLUDE_PACKAGE_NAME)));
 		return profile;
 	}
 
@@ -566,6 +573,7 @@ public class VpnProfileDataSource
 		}
 		values.put(KEY_LOGGING_LEVEL, profile.getLoggingLevel());
 		values.put(KEY_YUBIKEY, profile.isByYubikey() ? 1 : 0);
+		values.put(KEY_EXCLUDE_PACKAGE_NAME, profile.getExcludePackageNames());
 		return values;
 	}
 

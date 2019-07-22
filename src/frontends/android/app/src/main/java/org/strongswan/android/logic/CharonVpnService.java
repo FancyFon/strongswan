@@ -41,6 +41,7 @@ import android.security.KeyChainException;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.content.ContextCompat;
 import android.system.OsConstants;
+import android.text.TextUtils;
 import android.util.Log;
 
 import org.strongswan.android.R;
@@ -1131,6 +1132,7 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 					/* fall-through */
 				case SELECTED_APPS_EXCLUDE:
 					mSelectedApps.add(getPackageName());
+					mSelectedApps.addAll(profile.getExcludePackageNameList());
 					break;
 				case SELECTED_APPS_ONLY:
 					mSelectedApps.remove(getPackageName());
