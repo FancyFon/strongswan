@@ -18,8 +18,11 @@
 package org.strongswan.android.ui;
 
 import android.app.Dialog;
+import android.app.PendingIntent;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.nfc.NfcAdapter;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
@@ -38,6 +41,7 @@ import org.strongswan.android.R;
 import org.strongswan.android.data.VpnProfile;
 import org.strongswan.android.logic.TrustedCertificateManager;
 import org.strongswan.android.ui.VpnProfileListFragment.OnVpnProfileSelectedListener;
+import org.strongswan.android.yubikey.StartYubiKeyVpn;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -47,6 +51,7 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 {
 	public static final String CONTACT_EMAIL = "android@strongswan.org";
 	public static final String EXTRA_CRL_LIST = "org.strongswan.android.CRL_LIST";
+	private static final int NO_FLAGS = 0;
 
 	/**
 	 * Use "bring your own device" (BYOD) features
@@ -68,6 +73,18 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 
 		/* load CA certificates in a background task */
 		new LoadCertificatesTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+	}
+
+	@Override
+	protected void onResume() {
+		super.onResume();
+		startNfcAdapter();
+	}
+
+	@Override
+	protected void onPause() {
+		stopNfcAdapter();
+		super.onPause();
 	}
 
 	@Override
@@ -163,6 +180,27 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 			ft.remove(login);
 			ft.commit();
 		}
+	}
+
+	private void startNfcAdapter() {
+		NfcAdapter adapter = NfcAdapter.getDefaultAdapter(getApplicationContext());
+		if (adapter != null && !isDestroyed()) {
+			PendingIntent pendingIntent = PendingIntent.getActivity(getApplicationContext(), NO_FLAGS,
+					new Intent(this,StartYubiKeyVpn.class).
+							addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), NO_FLAGS);
+			IntentFilter ndef = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
+			ndef.addDataScheme("http");
+			ndef.addDataScheme("https");
+			adapter.enableForegroundDispatch(this, pendingIntent, new IntentFilter[] { ndef }, null);
+		}
+	}
+
+	private void stopNfcAdapter() {
+		NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(getApplicationContext());
+		if (nfcAdapter == null) {
+			return;
+		}
+		nfcAdapter.disableForegroundDispatch(this);
 	}
 
 	/**
