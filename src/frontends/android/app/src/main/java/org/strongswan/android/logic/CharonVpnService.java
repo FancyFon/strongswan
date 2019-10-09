@@ -41,6 +41,7 @@ import android.security.KeyChainException;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.content.ContextCompat;
 import android.system.OsConstants;
+import android.text.TextUtils;
 import android.util.Log;
 
 import org.strongswan.android.R;
@@ -88,6 +89,8 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 	public static final String SIMPLE_LOG_FILE = "simple_charon.log";
 	public static final String KEY_IS_RETRY = "retry";
 	public static final int VPN_STATE_NOTIFICATION_ID = 1;
+	private static final String NEXT_PROFILE_ACTION = "org.strongswan.android.NEXT_PROFILE_ACTION";
+	private static final String NEXT_PROFILE_EXTRA = "org.strongswan.android.NEXT_PROFILE_EXTRA";
 
 	private String mLogFile;
 	private String mAppDir;
@@ -246,8 +249,16 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 		{
 			this.mNextProfile = profile;
 			mProfileUpdated = true;
+			sendBroadcastNextProfile(profile);
 			notifyAll();
 		}
+	}
+
+	// TODO: security, permission?
+	private void sendBroadcastNextProfile(VpnProfile profile) {
+		Intent broadcastIntent = new Intent(NEXT_PROFILE_ACTION);
+		broadcastIntent.putExtra(NEXT_PROFILE_EXTRA, profile != null ? profile.getName() : null);
+		sendBroadcast(broadcastIntent);
 	}
 
 	@Override
@@ -1121,6 +1132,7 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 					/* fall-through */
 				case SELECTED_APPS_EXCLUDE:
 					mSelectedApps.add(getPackageName());
+					mSelectedApps.addAll(profile.getExcludePackageNameList());
 					break;
 				case SELECTED_APPS_ONLY:
 					mSelectedApps.remove(getPackageName());

@@ -20,6 +20,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.NFC" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="org.strongswan.android.permission.VPN_PROFILE_CHANGED_FROM_REMOTE"/>
 
@@ -147,6 +148,24 @@
                 <data android:mimeType="application/x-pem-file" />
                 <data android:mimeType="application/pkix-cert" />
             </intent-filter>
+        </activity>
+        <activity android:name=".yubikey.StartYubiKeyVpn">
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data
+                    android:host="my.yubico.com"
+                    android:pathPrefix="/neo/"
+                    android:scheme="https" />
+
+                <data
+                    android:host="my.yubico.com"
+                    android:pathPrefix="/yk/"
+                    android:scheme="https" />
+            </intent-filter>
+
         </activity>
 
         <service

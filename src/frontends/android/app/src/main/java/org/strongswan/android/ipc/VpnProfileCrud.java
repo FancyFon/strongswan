@@ -50,7 +50,7 @@ public class VpnProfileCrud {
     }
 
     public Bundle readVpnProfile(String name) {
-        VpnProfile vpnProfile = source.getVpnProfile(name);
+        VpnProfile vpnProfile = source.getVpnProfileByName(name);
         if (vpnProfile == null) {
             return null;
         }
@@ -79,7 +79,10 @@ public class VpnProfileCrud {
     }
 
     public boolean deleteVpnProfile(String name) {
-        VpnProfile profile = source.getVpnProfile(name);
+        VpnProfile profile = source.getVpnProfileByName(name);
+        if (profile == null) {
+            return false;
+        }
         boolean result = source.deleteVpnProfile(profile);
         if(result && profile != null) {
             return deleteCertificate(profile.getCertificateId());
