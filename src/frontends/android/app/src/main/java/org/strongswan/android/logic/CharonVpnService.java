@@ -1123,6 +1123,11 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 			mSplitTunneling = splitTunneling != null ? splitTunneling : 0;
 			SelectedAppsHandling appHandling = profile.getSelectedAppsHandling();
 			mSelectedApps = profile.getSelectedAppsSet();
+			if (profile.getAllowedApplications() != null && !profile.getAllowedApplications().isEmpty()) {
+				appHandling = SelectedAppsHandling.SELECTED_APPS_ONLY;
+				mSelectedApps.clear();
+				mSelectedApps.addAll(profile.getAllowedApplications());
+			}
 			/* exclude our own app, otherwise the fetcher is blocked */
 			switch (appHandling)
 			{
