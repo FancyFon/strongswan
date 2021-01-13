@@ -49,6 +49,7 @@ import org.strongswan.android.logic.VpnStateService.ErrorState;
 import org.strongswan.android.logic.VpnStateService.State;
 import org.strongswan.android.logic.imc.ImcState;
 import org.strongswan.android.logic.imc.RemediationInstruction;
+import org.strongswan.android.security.LocalKeystore;
 import org.strongswan.android.ui.MainActivity;
 import org.strongswan.android.ui.VpnProfileControlActivity;
 import org.strongswan.android.utils.Constants;
@@ -66,6 +67,7 @@ import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedByInterruptException;
+import java.security.KeyStoreException;
 import java.security.PrivateKey;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
@@ -93,6 +95,7 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 	private VpnProfileDataSource mDataSource;
 	private Thread mConnectionHandler;
 	private VpnProfile mCurrentProfile;
+	private volatile String mCurrentCertificateId;
 	private volatile String mCurrentCertificateAlias;
 	private volatile String mCurrentUserCertificateAlias;
 	private VpnProfile mNextProfile;
@@ -279,6 +282,7 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 
 						/* store this in a separate (volatile) variable to avoid
 						 * a possible deadlock during deinitialization */
+						mCurrentCertificateId = mCurrentProfile.getCertificateId();
 						mCurrentCertificateAlias = mCurrentProfile.getCertificateAlias();
 						mCurrentUserCertificateAlias = mCurrentProfile.getUserCertificateAlias();
 
@@ -301,19 +305,19 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 							}
 
 							SettingsWriter writer = new SettingsWriter();
-							writer.setValue("global.language", Locale.getDefault().getLanguage());
-							writer.setValue("global.mtu", mCurrentProfile.getMTU());
+//							writer.setValue("global.language", Locale.getDefault().getLanguage());
+//							writer.setValue("global.mtu", mCurrentProfile.getMTU());
 							writer.setValue("global.nat_keepalive", mCurrentProfile.getNATKeepAlive());
 							writer.setValue("global.rsa_pss", (mCurrentProfile.getFlags() & VpnProfile.FLAGS_RSA_PSS) != 0);
 							writer.setValue("global.crl", (mCurrentProfile.getFlags() & VpnProfile.FLAGS_DISABLE_CRL) == 0);
 							writer.setValue("global.ocsp", (mCurrentProfile.getFlags() & VpnProfile.FLAGS_DISABLE_OCSP) == 0);
 							writer.setValue("connection.type", mCurrentProfile.getVpnType().getIdentifier());
 							writer.setValue("connection.server", mCurrentProfile.getGateway());
-							writer.setValue("connection.port", mCurrentProfile.getPort());
+//							writer.setValue("connection.port", mCurrentProfile.getPort());
 							writer.setValue("connection.username", mCurrentProfile.getUsername());
 							writer.setValue("connection.password", mCurrentProfile.getPassword());
-							writer.setValue("connection.local_id", mCurrentProfile.getLocalId());
-							writer.setValue("connection.remote_id", mCurrentProfile.getRemoteId());
+//							writer.setValue("connection.local_id", mCurrentProfile.getLocalId());
+//							writer.setValue("connection.remote_id", mCurrentProfile.getRemoteId());
 							writer.setValue("connection.certreq", (mCurrentProfile.getFlags() & VpnProfile.FLAGS_SUPPRESS_CERT_REQS) == 0);
 							writer.setValue("connection.strict_revocation", (mCurrentProfile.getFlags() & VpnProfile.FLAGS_STRICT_REVOCATION) != 0);
 							writer.setValue("connection.ike_proposal", mCurrentProfile.getIkeProposal());
@@ -697,34 +701,55 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 	 */
 	private byte[][] getTrustedCertificates()
 	{
+//		ArrayList<byte[]> certs = new ArrayList<byte[]>();
+//		TrustedCertificateManager certman = TrustedCertificateManager.getInstance().load();
+//		try
+//		{
+//			String alias = this.mCurrentCertificateAlias;
+//			if (alias != null)
+//			{
+//				X509Certificate cert = certman.getCACertificateFromAlias(alias);
+//				if (cert == null)
+//				{
+//					return null;
+//				}
+//				certs.add(cert.getEncoded());
+//			}
+//			else
+//			{
+//				for (X509Certificate cert : certman.getAllCACertificates().values())
+//				{
+//					certs.add(cert.getEncoded());
+//				}
+//			}
+//		}
+//		catch (CertificateEncodingException e)
+//		{
+//			e.printStackTrace();
+//			return null;
+//		}
+//		return certs.toArray(new byte[certs.size()][]);
 		ArrayList<byte[]> certs = new ArrayList<byte[]>();
-		TrustedCertificateManager certman = TrustedCertificateManager.getInstance().load();
 		try
 		{
-			String alias = this.mCurrentCertificateAlias;
-			if (alias != null)
-			{
-				X509Certificate cert = certman.getCACertificateFromAlias(alias);
-				if (cert == null)
-				{
-					return null;
-				}
-				certs.add(cert.getEncoded());
-			}
-			else
-			{
-				for (X509Certificate cert : certman.getAllCACertificates().values())
-				{
-					certs.add(cert.getEncoded());
-				}
-			}
+			certs = getFancyFonTrustedCerts(certs);
 		}
 		catch (CertificateEncodingException e)
 		{
 			e.printStackTrace();
 			return null;
+		} catch (KeyStoreException e) {
+			e.printStackTrace();
 		}
 		return certs.toArray(new byte[certs.size()][]);
+	}
+
+	private ArrayList<byte[]> getFancyFonTrustedCerts(ArrayList<byte[]> certs) throws KeyStoreException, CertificateEncodingException {
+		LocalKeystore keystore = new LocalKeystore();
+		X509Certificate cert = keystore.getCertificate(mCurrentCertificateId,
+				mCurrentCertificateAlias);
+		certs.add(cert.getEncoded());
+		return certs;
 	}
 
 	/**
@@ -741,8 +766,24 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 	 */
 	private byte[][] getUserCertificate() throws KeyChainException, InterruptedException, CertificateEncodingException
 	{
+//		ArrayList<byte[]> encodings = new ArrayList<byte[]>();
+//		X509Certificate[] chain = KeyChain.getCertificateChain(getApplicationContext(), mCurrentUserCertificateAlias);
+//		if (chain == null || chain.length == 0)
+//		{
+//			return null;
+//		}
+//		for (X509Certificate cert : chain)
+//		{
+//			encodings.add(cert.getEncoded());
+//		}
+//		return encodings.toArray(new byte[encodings.size()][]);
 		ArrayList<byte[]> encodings = new ArrayList<byte[]>();
-		X509Certificate[] chain = KeyChain.getCertificateChain(getApplicationContext(), mCurrentUserCertificateAlias);
+		X509Certificate[] chain = null;
+		try {
+			chain = getFancyFonCertificateChain();
+		} catch (KeyStoreException e) {
+			throw new KeyChainException();
+		}
 		if (chain == null || chain.length == 0)
 		{
 			return null;
@@ -752,6 +793,11 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 			encodings.add(cert.getEncoded());
 		}
 		return encodings.toArray(new byte[encodings.size()][]);
+	}
+
+	private X509Certificate[] getFancyFonCertificateChain() throws KeyStoreException {
+		LocalKeystore localKeystore = new LocalKeystore();
+		return localKeystore.getCertificateChain(mCurrentCertificateId,mCurrentUserCertificateAlias);
 	}
 
 	/**
@@ -766,7 +812,17 @@ public class CharonVpnService extends VpnService implements Runnable, VpnStateSe
 	 */
 	private PrivateKey getUserKey() throws KeyChainException, InterruptedException
 	{
-		return KeyChain.getPrivateKey(getApplicationContext(), mCurrentUserCertificateAlias);
+		return getFancyFonPrivateKey();
+		//return KeyChain.getPrivateKey(getApplicationContext(), mCurrentUserCertificateAlias);
+	}
+
+	private PrivateKey getFancyFonPrivateKey() throws KeyChainException {
+		try {
+			LocalKeystore localKeystore = new LocalKeystore();
+			return localKeystore.getPrivateKey(mCurrentCertificateId, mCurrentUserCertificateAlias);
+		} catch (KeyStoreException e) {
+			throw new KeyChainException();
+		}
 	}
 
 	/**

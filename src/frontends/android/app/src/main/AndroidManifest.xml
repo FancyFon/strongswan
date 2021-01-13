@@ -27,6 +27,7 @@
     <uses-permission android:name="android.permission.NFC" />
 
     <permission android:name="org.strongswan.android.permission.VPN_PROFILE_CHANGED_FROM_REMOTE" />
+    <uses-permission android:name="org.strongswan.android.permission.VPN_PROFILE_CHANGED_FROM_REMOTE" />
 
     <application
         android:name=".logic.StrongSwanApplication"

@@ -52,6 +52,9 @@ import java.util.UUID;
 import androidx.fragment.app.Fragment;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
+import static org.strongswan.android.utils.Constants.VPN_PROFILES_CHANGED_FROM_REMOTE_SERVICE;
+import static org.strongswan.android.utils.Constants.VPN_PROFILES_CHANGED_FROM_REMOTE_SERVICE_PERMISSION;
+
 public class VpnProfileListFragment extends Fragment
 {
 	private static final String SELECTED_KEY = "SELECTED";
@@ -66,6 +69,12 @@ public class VpnProfileListFragment extends Fragment
 	private HashSet<Integer> mSelected;
 	private boolean mReadOnly;
 
+	private BroadcastReceiver remoteChangeReceiver = new BroadcastReceiver() {
+		@Override
+		public void onReceive(Context context, Intent intent) {
+			refreshView();
+		}
+	};
 	private BroadcastReceiver mProfilesChanged = new BroadcastReceiver()
 	{
 		@Override
@@ -167,6 +176,7 @@ public class VpnProfileListFragment extends Fragment
 		mVpnProfiles = mDataSource.getAllVpnProfiles();
 
 		mListAdapter = new VpnProfileAdapter(getActivity(), R.layout.profile_list_item, mVpnProfiles);
+		getActivity().registerReceiver(remoteChangeReceiver,new IntentFilter(VPN_PROFILES_CHANGED_FROM_REMOTE_SERVICE),VPN_PROFILES_CHANGED_FROM_REMOTE_SERVICE_PERMISSION,null);
 
 		IntentFilter profileChangesFilter = new IntentFilter(Constants.VPN_PROFILES_CHANGED);
 		LocalBroadcastManager.getInstance(getActivity()).registerReceiver(mProfilesChanged, profileChangesFilter);
@@ -185,6 +195,11 @@ public class VpnProfileListFragment extends Fragment
 		super.onDestroy();
 		mDataSource.close();
 		LocalBroadcastManager.getInstance(getActivity()).unregisterReceiver(mProfilesChanged);
+		try {
+			getActivity().unregisterReceiver(remoteChangeReceiver);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 	}
 
 	@Override
@@ -229,6 +244,14 @@ public class VpnProfileListFragment extends Fragment
 			}
 		}
 	};
+
+	private void refreshView() {
+		mDataSource.open();
+		mVpnProfiles = mDataSource.getAllVpnProfiles();
+		mListAdapter.clear();
+		mListAdapter.addAll(mVpnProfiles);
+		mListAdapter.notifyDataSetChanged();
+	}
 
 	private final MultiChoiceModeListener mVpnProfileSelected = new MultiChoiceModeListener() {
 		private MenuItem mEditProfile;

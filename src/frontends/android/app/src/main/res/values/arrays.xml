@@ -29,10 +29,4 @@
         <item>Exclude selected applications from the VPN</item>
         <item>Only selected applications use the VPN</item>
     </string-array>
-
-    <string-array name="trusted_fingerprints">
-    </string-array>
-
-    <string-array name="trusted_packages">
-    </string-array>
 </resources>

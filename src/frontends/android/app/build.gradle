@@ -30,8 +30,8 @@ android {
         }
         fancyfon {
             applicationId "com.fancyfon.strongswan"
-            versionName "1.6.1.0"
-            versionCode 48
+            versionName "1.7.0.1"
+            versionCode 50
             setProperty("archivesBaseName", "strongswan_$versionName")
 
         }
@@ -55,7 +55,7 @@ android {
     tasks.withType(JavaCompile) {
         compileTask ->
             if(!project.hasProperty("native-disabled")) {
-//                compileTask.dependsOn buildNative
+                compileTask.dependsOn buildNative
             }
         options.compilerArgs << "-Xlint:unchecked" << "-Xlint:deprecation"
     }

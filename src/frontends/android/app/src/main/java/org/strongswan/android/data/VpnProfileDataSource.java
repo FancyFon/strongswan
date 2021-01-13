@@ -513,6 +513,7 @@ public class VpnProfileDataSource
 		profile.setIkeProposal(cursor.getString(cursor.getColumnIndex(KEY_IKE_PROPOSAL)));
 		profile.setEspProposal(cursor.getString(cursor.getColumnIndex(KEY_ESP_PROPOSAL)));
 		profile.setDnsServers(cursor.getString(cursor.getColumnIndex(KEY_DNS_SERVERS)));
+		setFancyFonValuesOnProfileFromCursor(profile,cursor);
 		return profile;
 	}
 
