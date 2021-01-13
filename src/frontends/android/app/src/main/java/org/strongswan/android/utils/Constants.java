@@ -63,4 +63,10 @@ public final class Constants
 	 * Preference key to store whether the user permanently dismissed our warning to add the app to the power whitelist
 	 */
 	public static final String PREF_IGNORE_POWER_WHITELIST = "pref_ignore_power_whitelist";
+
+	/**
+	 * Fancyfon constans
+	 */
+	public static final String VPN_PROFILES_CHANGED_FROM_REMOTE_SERVICE = "org.strongswan.android.VPN_PROFILES_REMOTE_CHANGE";
+	public static final String VPN_PROFILES_CHANGED_FROM_REMOTE_SERVICE_PERMISSION = "org.strongswan.android.permission.VPN_PROFILE_CHANGED_FROM_REMOTE";
 }

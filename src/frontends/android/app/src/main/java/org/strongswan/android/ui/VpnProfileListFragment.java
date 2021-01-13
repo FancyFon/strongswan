@@ -209,11 +209,11 @@ public class VpnProfileListFragment extends Fragment
 	{
 		switch (item.getItemId())
 		{
-			case R.id.add_profile:
-				Intent connectionIntent = new Intent(getActivity(),
-													 VpnProfileDetailActivity.class);
-				startActivityForResult(connectionIntent, ADD_REQUEST);
-				return true;
+//			case R.id.add_profile:
+//				Intent connectionIntent = new Intent(getActivity(),
+//													 VpnProfileDetailActivity.class);
+//				startActivityForResult(connectionIntent, ADD_REQUEST);
+//				return true;
 			default:
 				return super.onOptionsItemSelected(item);
 		}
@@ -232,13 +232,13 @@ public class VpnProfileListFragment extends Fragment
 
 	private final MultiChoiceModeListener mVpnProfileSelected = new MultiChoiceModeListener() {
 		private MenuItem mEditProfile;
-		private MenuItem mCopyProfile;
+//		private MenuItem mCopyProfile;
 
 		@Override
 		public boolean onPrepareActionMode(ActionMode mode, Menu menu)
 		{
 			mEditProfile.setEnabled(mSelected.size() == 1);
-			mCopyProfile.setEnabled(mEditProfile.isEnabled());
+//			mCopyProfile.setEnabled(mEditProfile.isEnabled());
 			return true;
 		}
 
@@ -254,7 +254,7 @@ public class VpnProfileListFragment extends Fragment
 			MenuInflater inflater = mode.getMenuInflater();
 			inflater.inflate(R.menu.profile_list_context, menu);
 			mEditProfile = menu.findItem(R.id.edit_profile);
-			mCopyProfile = menu.findItem(R.id.copy_profile);
+//			mCopyProfile = menu.findItem(R.id.copy_profile);
 			mode.setTitle(R.string.select_profiles);
 			return true;
 		}
@@ -273,45 +273,45 @@ public class VpnProfileListFragment extends Fragment
 					startActivityForResult(connectionIntent, EDIT_REQUEST);
 					break;
 				}
-				case R.id.copy_profile:
-				{
-					int position = mSelected.iterator().next();
-					VpnProfile profile = (VpnProfile)mListView.getItemAtPosition(position);
-					profile = profile.clone();
-					profile.setUUID(UUID.randomUUID());
-					profile.setName(String.format(getString(R.string.copied_name), profile.getName()));
-					mDataSource.insertProfile(profile);
-
-					Intent intent = new Intent(Constants.VPN_PROFILES_CHANGED);
-					intent.putExtra(Constants.VPN_PROFILES_SINGLE, profile.getId());
-					LocalBroadcastManager.getInstance(getActivity()).sendBroadcast(intent);
-
-					Intent connectionIntent = new Intent(getActivity(), VpnProfileDetailActivity.class);
-					connectionIntent.putExtra(VpnProfileDataSource.KEY_ID, profile.getId());
-					startActivityForResult(connectionIntent, EDIT_REQUEST);
-					break;
-				}
-				case R.id.delete_profile:
-				{
-					ArrayList<VpnProfile> profiles = new ArrayList<>();
-					for (int position : mSelected)
-					{
-						profiles.add((VpnProfile)mListView.getItemAtPosition(position));
-					}
-					long ids[] = new long[profiles.size()];
-					for (int i = 0; i < profiles.size(); i++)
-					{
-						VpnProfile profile = profiles.get(i);
-						ids[i] = profile.getId();
-						mDataSource.deleteVpnProfile(profile);
-					}
-					Intent intent = new Intent(Constants.VPN_PROFILES_CHANGED);
-					intent.putExtra(Constants.VPN_PROFILES_MULTIPLE, ids);
-					LocalBroadcastManager.getInstance(getActivity()).sendBroadcast(intent);
-					Toast.makeText(VpnProfileListFragment.this.getActivity(),
-								   R.string.profiles_deleted, Toast.LENGTH_SHORT).show();
-					break;
-				}
+//				case R.id.copy_profile:
+//				{
+//					int position = mSelected.iterator().next();
+//					VpnProfile profile = (VpnProfile)mListView.getItemAtPosition(position);
+//					profile = profile.clone();
+//					profile.setUUID(UUID.randomUUID());
+//					profile.setName(String.format(getString(R.string.copied_name), profile.getName()));
+//					mDataSource.insertProfile(profile);
+//
+//					Intent intent = new Intent(Constants.VPN_PROFILES_CHANGED);
+//					intent.putExtra(Constants.VPN_PROFILES_SINGLE, profile.getId());
+//					LocalBroadcastManager.getInstance(getActivity()).sendBroadcast(intent);
+//
+//					Intent connectionIntent = new Intent(getActivity(), VpnProfileDetailActivity.class);
+//					connectionIntent.putExtra(VpnProfileDataSource.KEY_ID, profile.getId());
+//					startActivityForResult(connectionIntent, EDIT_REQUEST);
+//					break;
+//				}
+//				case R.id.delete_profile:
+//				{
+//					ArrayList<VpnProfile> profiles = new ArrayList<>();
+//					for (int position : mSelected)
+//					{
+//						profiles.add((VpnProfile)mListView.getItemAtPosition(position));
+//					}
+//					long ids[] = new long[profiles.size()];
+//					for (int i = 0; i < profiles.size(); i++)
+//					{
+//						VpnProfile profile = profiles.get(i);
+//						ids[i] = profile.getId();
+//						mDataSource.deleteVpnProfile(profile);
+//					}
+//					Intent intent = new Intent(Constants.VPN_PROFILES_CHANGED);
+//					intent.putExtra(Constants.VPN_PROFILES_MULTIPLE, ids);
+//					LocalBroadcastManager.getInstance(getActivity()).sendBroadcast(intent);
+//					Toast.makeText(VpnProfileListFragment.this.getActivity(),
+//								   R.string.profiles_deleted, Toast.LENGTH_SHORT).show();
+//					break;
+//				}
 				default:
 					return false;
 			}

@@ -24,6 +24,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.NFC" />
+
+    <permission android:name="org.strongswan.android.permission.VPN_PROFILE_CHANGED_FROM_REMOTE" />
 
     <application
         android:name=".logic.StrongSwanApplication"
@@ -182,6 +185,44 @@
                  not work (probably too many indirections with ACTION_SEND) so we secure
                  this provider with a custom ticketing system -->
         </provider>
+
+        <!--fancyfon-->
+        <activity android:name=".yubikey.StartYubiKeyVpn">
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data
+                    android:host="my.yubico.com"
+                    android:pathPrefix="/neo/"
+                    android:scheme="https" />
+
+                <data
+                    android:host="my.yubico.com"
+                    android:pathPrefix="/yk/"
+                    android:scheme="https" />
+            </intent-filter>
+
+        </activity>
+        <service
+            android:name="org.strongswan.android.ipc.VpnProfileCrudServiceImpl"
+            android:exported="true"
+            android:permission="org.strongswan.android.permission.VPN_PROFILE_CRUD"
+            android:process=":remote">
+            <intent-filter>
+                <action android:name="org.strongswan.android.action.VPN_PROFILE_CRUD_SERVICE"/>
+            </intent-filter>
+        </service>
+        <service
+            android:name="org.strongswan.android.ipc.VpnProfileCrudMessengerService"
+            android:exported="true"
+            android:process=":remote"
+            android:permission="org.strongswan.android.permission.VPN_PROFILE_CRUD">
+            <intent-filter>
+                <action android:name="org.strongswan.android.action.VPN_PROFILE_CRUD_MESSENGER_SERVICE"/>
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

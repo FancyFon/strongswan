@@ -17,28 +17,33 @@
       xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
-        android:id="@+id/menu_import_profile"
-        android:title="@string/profile_import"
-        app:showAsAction="withText" />
-
-    <item
-        android:id="@+id/menu_manage_certs"
-        android:title="@string/trusted_certs_title"
-        app:showAsAction="withText" />
-
-    <item
-        android:id="@+id/menu_crl_cache"
-        android:title="@string/crl_cache"
-        app:showAsAction="withText" />
-
-    <item
         android:id="@+id/menu_show_log"
         android:title="@string/show_log"
         app:showAsAction="withText" />
 
-    <item
-        android:id="@+id/menu_settings"
-        android:title="@string/pref_title"
-        app:showAsAction="withText" />
+<!--    <item-->
+<!--        android:id="@+id/menu_import_profile"-->
+<!--        android:title="@string/profile_import"-->
+<!--        app:showAsAction="withText" />-->
+
+<!--    <item-->
+<!--        android:id="@+id/menu_manage_certs"-->
+<!--        android:title="@string/trusted_certs_title"-->
+<!--        app:showAsAction="withText" />-->
+
+<!--    <item-->
+<!--        android:id="@+id/menu_crl_cache"-->
+<!--        android:title="@string/crl_cache"-->
+<!--        app:showAsAction="withText" />-->
+
+<!--    <item-->
+<!--        android:id="@+id/menu_show_log"-->
+<!--        android:title="@string/show_log"-->
+<!--        app:showAsAction="withText" />-->
+
+<!--    <item-->
+<!--        android:id="@+id/menu_settings"-->
+<!--        android:title="@string/pref_title"-->
+<!--        app:showAsAction="withText" />-->
 
 </menu>

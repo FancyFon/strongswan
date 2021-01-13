@@ -33,6 +33,7 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.EditText;
 import android.widget.Toast;
 
@@ -53,10 +54,15 @@ import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
 import androidx.preference.PreferenceManager;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class VpnProfileControlActivity extends AppCompatActivity
 {
 	public static final String START_PROFILE = "org.strongswan.android.action.START_PROFILE";
 	public static final String DISCONNECT = "org.strongswan.android.action.DISCONNECT";
+	public static final String START_YUBIKEY = "org.strongswan.android.action.START_YUBIKEY";
+	public static final String YUBIKEY_EXTRA_PASSWORD = "org.strongswan.android.action.YUBIKEY_EXTRA_PASSWORD";
 	public static final String EXTRA_VPN_PROFILE_ID = "org.strongswan.android.VPN_PROFILE_ID";
 
 	private static final int PREPARE_VPN_SERVICE = 0;
@@ -67,6 +73,7 @@ public class VpnProfileControlActivity extends AppCompatActivity
 	private static final String PROFILE_RECONNECT = "RECONNECT";
 	private static final String PROFILE_DISCONNECT = "DISCONNECT";
 	private static final String DIALOG_TAG = "Dialog";
+	private static final String YUBIKEY_DIALOG_TAG = YubikeyChooseDialog.class.getSimpleName();
 
 	private Bundle mProfileInfo;
 	private boolean mWaitingForResult;
@@ -363,6 +370,19 @@ public class VpnProfileControlActivity extends AppCompatActivity
 		}
 	}
 
+	private void startVpnProfile(String profileName, String password)
+	{
+		VpnProfileDataSource dataSource = new VpnProfileDataSource(this);
+		dataSource.open();
+
+		VpnProfile profile = dataSource.getVpnProfileByName(profileName);
+
+		dataSource.close();
+
+		profile.setPassword(password);
+		startVpnProfile(profile);
+	}
+
 	/**
 	 * Disconnect the current connection, if any (silently ignored if there is no connection).
 	 *
@@ -422,6 +442,8 @@ public class VpnProfileControlActivity extends AppCompatActivity
 		else if (DISCONNECT.equals(intent.getAction()))
 		{
 			disconnect(intent);
+		} else if (START_YUBIKEY.equals(intent.getAction())) {
+			startProfileViaYubikey(intent);
 		}
 	}
 
@@ -437,6 +459,84 @@ public class VpnProfileControlActivity extends AppCompatActivity
 			FragmentTransaction ft = fm.beginTransaction();
 			ft.remove(login);
 			ft.commit();
+		}
+	}
+
+	private void startProfileViaYubikey(Intent intent) {
+		String password = intent.getStringExtra(YUBIKEY_EXTRA_PASSWORD);
+
+		VpnProfileDataSource dataSource = new VpnProfileDataSource(this);
+		dataSource.open();
+
+		List<VpnProfile> profiles = dataSource.getYubikeyProfiles();
+		dataSource.close();
+
+		if (profiles.isEmpty()) {
+			Toast.makeText(this, R.string.yubikey_profile_not_found, Toast.LENGTH_LONG).show();
+			finish();
+		} else if (profiles.size() == 1) {
+			VpnProfile profile = profiles.get(0);
+			profile.setPassword(password);
+			startVpnProfile(profile);
+			finish();
+		} else {
+			ArrayList<String> profileNames = new ArrayList<>();
+			for (VpnProfile profile : profiles) {
+				profileNames.add(profile.getName());
+			}
+			Bundle profileInfo = new Bundle();
+			profileInfo.putStringArrayList(YubikeyChooseDialog.KEY_PROFILE_LIST, profileNames);
+			profileInfo.putString(YubikeyChooseDialog.KEY_PASSWORD, password);
+
+			removeFragmentByTag(YUBIKEY_DIALOG_TAG);
+			YubikeyChooseDialog dialog = new YubikeyChooseDialog();
+			dialog.setArguments(profileInfo);
+			dialog.show(getSupportFragmentManager(), YUBIKEY_DIALOG_TAG);
+		}
+	}
+
+	public static class YubikeyChooseDialog extends AppCompatDialogFragment {
+		public static final String KEY_PROFILE_LIST = "KEY_PROFILE_LIST";
+		public static final String KEY_PASSWORD = "KEY_PASSWORD";
+
+		@Override
+		public Dialog onCreateDialog(Bundle savedInstanceState) {
+			final Bundle profileInfo = getArguments();
+			int icon = android.R.drawable.ic_dialog_info;
+			String title = "Choose VPN profile";
+
+			final ArrayAdapter<String> arrayAdapter = new ArrayAdapter<String>(getActivity(), android.R.layout.select_dialog_singlechoice);
+			for (String profileName : profileInfo.getStringArrayList(KEY_PROFILE_LIST)) {
+				arrayAdapter.add(profileName);
+			}
+
+			AlertDialog.Builder builder = new AlertDialog.Builder(getActivity())
+				.setIcon(icon)
+				.setTitle(title)
+				.setAdapter(arrayAdapter, new DialogInterface.OnClickListener() {
+					@Override
+					public void onClick(DialogInterface dialog, int which) {
+						String profileName = arrayAdapter.getItem(which);
+						String password = profileInfo.getString(KEY_PASSWORD);
+						VpnProfileControlActivity activity = (VpnProfileControlActivity) getActivity();
+						activity.startVpnProfile(profileName,password);
+					}
+				});
+			builder.setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					getActivity().finish();
+				}
+			});
+
+			return builder.create();
+		}
+
+
+		@Override
+		public void onCancel(DialogInterface dialog)
+		{
+			getActivity().finish();
 		}
 	}
 

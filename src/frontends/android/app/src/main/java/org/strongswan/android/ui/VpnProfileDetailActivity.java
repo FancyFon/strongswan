@@ -349,6 +349,7 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 
 		updateCredentialView();
 		updateCertificateSelector();
+		lockFancyFonEditIfNeeded();
 		updateAdvancedSettings();
 		updateAppsSelector();
 	}
@@ -387,18 +388,40 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 		return true;
 	}
 
+	private void lockFancyFonEditIfNeeded() {
+		disableFancyFonUiEditOptions();
+	}
+
+	private void disableFancyFonUiEditOptions(){
+		mPassword.setEnabled(false);
+		mUsername.setEnabled(false);
+		mGateway.setEnabled(false);
+		mName.setEnabled(false);
+		mSelectVpnType.setEnabled(false);
+		mSelectVpnType.setClickable(false);
+		mCheckAuto.setEnabled(false);
+		mCheckAuto.setChecked(false);
+		mShowAdvanced.setEnabled(false);
+//		mSelectUserId.setEnabled(false);
+		mSelectCert.setOnClickListener(null);
+		mSelectUserCert.setOnClickListener(null);
+		mCheckAuto.setEnabled(false);
+	}
+
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item)
 	{
 		switch (item.getItemId())
 		{
 			case android.R.id.home:
-			case R.id.menu_cancel:
-				finish();
+				onBackPressed();
 				return true;
-			case R.id.menu_accept:
-				saveProfile();
-				return true;
+//			case R.id.menu_cancel:
+//				finish();
+//				return true;
+//			case R.id.menu_accept:
+//				saveProfile();
+//				return true;
 			default:
 				return super.onOptionsItemSelected(item);
 		}
@@ -471,17 +494,17 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 	 */
 	private void showCertificateAlert()
 	{
-		AlertDialog.Builder adb = new AlertDialog.Builder(VpnProfileDetailActivity.this);
-		adb.setTitle(R.string.alert_text_nocertfound_title);
-		adb.setMessage(R.string.alert_text_nocertfound);
-		adb.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
-			@Override
-			public void onClick(DialogInterface dialog, int id)
-			{
-				dialog.cancel();
-			}
-		});
-		adb.show();
+//		AlertDialog.Builder adb = new AlertDialog.Builder(VpnProfileDetailActivity.this);
+//		adb.setTitle(R.string.alert_text_nocertfound_title);
+//		adb.setMessage(R.string.alert_text_nocertfound);
+//		adb.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+//			@Override
+//			public void onClick(DialogInterface dialog, int id)
+//			{
+//				dialog.cancel();
+//			}
+//		});
+//		adb.show();
 	}
 
 	/**
@@ -573,6 +596,9 @@ public class VpnProfileDetailActivity extends AppCompatActivity
 			mProfileIdLabel.setVisibility(View.GONE);
 			mProfileId.setVisibility(View.GONE);
 		}
+
+		mShowAdvanced.setVisibility(View.GONE);
+		mAdvancedSettings.setVisibility(View.GONE);
 	}
 
 	/**

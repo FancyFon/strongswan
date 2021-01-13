@@ -27,6 +27,8 @@ import android.database.sqlite.SQLiteQueryBuilder;
 import android.util.Log;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 
@@ -57,14 +59,23 @@ public class VpnProfileDataSource
 	public static final String KEY_ESP_PROPOSAL = "esp_proposal";
 	public static final String KEY_DNS_SERVERS = "dns_servers";
 
+	//fancyfon
+	public static final String KEY_CERTIFICATE_ID = "id_certificate";
+	public static final String KEY_ALLOWED_APPLICATIONS = "allowed_applications";
+	private static final String EMPTY_STRING = "";
+	private static final String SPLIT_TUNNELING_DEFAULT_VALUE = "0";
+	private static final String KEY_YUBIKEY = "yubikey";
+	private static final String KEY_EXCLUDE_PACKAGE_NAME = "exclude_package_name";
+
 	private DatabaseHelper mDbHelper;
 	private SQLiteDatabase mDatabase;
 	private final Context mContext;
 
 	private static final String DATABASE_NAME = "strongswan.db";
 	private static final String TABLE_VPNPROFILE = "vpnprofile";
+	public static final String KEY_LOGGING_LEVEL="logging_level";
 
-	private static final int DATABASE_VERSION = 17;
+	private static final int DATABASE_VERSION = 18;
 
 	public static final DbColumn[] COLUMNS = new DbColumn[] {
 								new DbColumn(KEY_ID, "INTEGER PRIMARY KEY AUTOINCREMENT", 1),
@@ -90,7 +101,13 @@ public class VpnProfileDataSource
 								new DbColumn(KEY_IKE_PROPOSAL, "TEXT", 15),
 								new DbColumn(KEY_ESP_PROPOSAL, "TEXT", 15),
 								new DbColumn(KEY_DNS_SERVERS, "TEXT", 17),
-							};
+								// fancyfon
+								new DbColumn(KEY_CERTIFICATE_ID, "TEXT", 17),
+								new DbColumn(KEY_ALLOWED_APPLICATIONS, "TEXT", 17),
+								new DbColumn(KEY_LOGGING_LEVEL, "INTEGER", 17),
+								new DbColumn(KEY_YUBIKEY, "INTEGER", 17),
+								new DbColumn(KEY_EXCLUDE_PACKAGE_NAME, "TEXT", 17),
+		};
 
 	private static final String[] ALL_COLUMNS = getColumns(DATABASE_VERSION);
 
@@ -250,6 +267,14 @@ public class VpnProfileDataSource
 				db.execSQL("ALTER TABLE " + TABLE_VPNPROFILE + " ADD " + KEY_DNS_SERVERS +
 						   " TEXT;");
 			}
+			if (oldVersion < 17) {
+				db.execSQL("ALTER TABLE " + TABLE_VPNPROFILE + " ADD " + KEY_YUBIKEY +
+						" INTEGER;");
+			}
+			if (oldVersion < 18) {
+				db.execSQL("ALTER TABLE " + TABLE_VPNPROFILE + " ADD " + KEY_EXCLUDE_PACKAGE_NAME +
+						" TEXT;");
+			}
 		}
 
 		private void updateColumns(SQLiteDatabase db, int version)
@@ -341,6 +366,26 @@ public class VpnProfileDataSource
 		return mDatabase.update(TABLE_VPNPROFILE, values, KEY_ID + " = " + id, null) > 0;
 	}
 
+	public List<VpnProfile> getYubikeyProfiles() {
+		List<VpnProfile> profiles = new ArrayList<>();
+		Cursor cursor = null;
+		try {
+			cursor = mDatabase.query(TABLE_VPNPROFILE, ALL_COLUMNS,
+					KEY_YUBIKEY + "= ?",
+					new String[]{"1"},
+					null, null, null, null);
+			while (cursor.moveToNext()) {
+				VpnProfile profile = VpnProfileFromCursor(cursor);
+				profiles.add(profile);
+			}
+		} finally {
+			if (cursor != null) {
+				cursor.close();
+			}
+		}
+		return profiles;
+	}
+
 	/**
 	 * Delete the given VPN profile from the database.
 	 * @param profile the profile to delete
@@ -410,6 +455,18 @@ public class VpnProfileDataSource
 		}
 	}
 
+	public VpnProfile getVpnProfileByName(String profileName) {
+		VpnProfile profile = null;
+		Cursor cursor = mDatabase.query(TABLE_VPNPROFILE, ALL_COLUMNS,
+				KEY_NAME + "='" + profileName + "'", null, null, null, null);
+		if (cursor.moveToFirst())
+		{
+			profile = VpnProfileFromCursor(cursor);
+		}
+		cursor.close();
+		return profile;
+	}
+
 	/**
 	 * Get a list of all VPN profiles stored in the database.
 	 * @return list of VPN profiles
@@ -459,6 +516,22 @@ public class VpnProfileDataSource
 		return profile;
 	}
 
+	private VpnProfile setFancyFonValuesOnProfileFromCursor(VpnProfile profile, Cursor cursor){
+		profile.setCertificateId(cursor.getString(cursor.getColumnIndex(KEY_CERTIFICATE_ID)));
+		profile.setAllowedApplications(convertFromString(cursor.getString(cursor.getColumnIndex(KEY_ALLOWED_APPLICATIONS))));
+		profile.setLoggingLevel(cursor.getInt(cursor.getColumnIndex(KEY_LOGGING_LEVEL)));
+		profile.setByYubikey(cursor.getInt(cursor.getColumnIndex(KEY_YUBIKEY))==1);
+		profile.setExcludePackageNames(cursor.getString(cursor.getColumnIndex(KEY_EXCLUDE_PACKAGE_NAME)));
+		return profile;
+	}
+
+	private ArrayList<String> convertFromString(String string) {
+		if (string == null || string.length() == 0) {
+			return new ArrayList<String>();
+		}
+		return new ArrayList<String> ( Arrays.asList(string.split(",")));
+	}
+
 	private ContentValues ContentValuesFromVpnProfile(VpnProfile profile)
 	{
 		ContentValues values = new ContentValues();
@@ -470,11 +543,11 @@ public class VpnProfileDataSource
 		values.put(KEY_PASSWORD, profile.getPassword());
 		values.put(KEY_CERTIFICATE, profile.getCertificateAlias());
 		values.put(KEY_USER_CERTIFICATE, profile.getUserCertificateAlias());
-		values.put(KEY_MTU, profile.getMTU());
-		values.put(KEY_PORT, profile.getPort());
-		values.put(KEY_SPLIT_TUNNELING, profile.getSplitTunneling());
-		values.put(KEY_LOCAL_ID, profile.getLocalId());
-		values.put(KEY_REMOTE_ID, profile.getRemoteId());
+//		values.put(KEY_MTU, profile.getMTU());
+//		values.put(KEY_PORT, profile.getPort());
+//		values.put(KEY_SPLIT_TUNNELING, profile.getSplitTunneling());
+//		values.put(KEY_LOCAL_ID, profile.getLocalId());
+//		values.put(KEY_REMOTE_ID, profile.getRemoteId());
 		values.put(KEY_EXCLUDED_SUBNETS, profile.getExcludedSubnets());
 		values.put(KEY_INCLUDED_SUBNETS, profile.getIncludedSubnets());
 		values.put(KEY_SELECTED_APPS, profile.getSelectedAppsHandling().getValue());
@@ -484,7 +557,42 @@ public class VpnProfileDataSource
 		values.put(KEY_IKE_PROPOSAL, profile.getIkeProposal());
 		values.put(KEY_ESP_PROPOSAL, profile.getEspProposal());
 		values.put(KEY_DNS_SERVERS, profile.getDnsServers());
+		//not implemented in ff
+		values.put(KEY_MTU, EMPTY_STRING);
+		values.put(KEY_PORT, EMPTY_STRING);
+		values.put(KEY_SPLIT_TUNNELING, SPLIT_TUNNELING_DEFAULT_VALUE);
+		values.put(KEY_LOCAL_ID, EMPTY_STRING);
+		values.put(KEY_REMOTE_ID, EMPTY_STRING);
+		values = putFancyFonValues(values,profile);
 		return values;
+	}
+
+	private ContentValues putFancyFonValues(ContentValues values,VpnProfile profile){
+		values.put(KEY_CERTIFICATE_ID, profile.getCertificateId());
+		values.put(KEY_ALLOWED_APPLICATIONS, convertToString(profile.getAllowedApplications()));
+		if(profile.getLoggingLevel() == 0) {
+			profile.setLoggingLevel(1);
+		}
+		values.put(KEY_LOGGING_LEVEL, profile.getLoggingLevel());
+		values.put(KEY_YUBIKEY, profile.isByYubikey() ? 1 : 0);
+		values.put(KEY_EXCLUDE_PACKAGE_NAME, profile.getExcludePackageNames());
+		return values;
+	}
+
+	private String convertToString(ArrayList<String> list) {
+		if (list == null) {
+			return EMPTY_STRING;
+		}
+		StringBuilder buffer = new StringBuilder(list.size() * 16);
+		Iterator<String> it = list.iterator();
+		while (it.hasNext()) {
+			Object next = it.next();
+			buffer.append(next);
+			if (it.hasNext()) {
+				buffer.append(",");
+			}
+		}
+		return buffer.toString();
 	}
 
 	private Integer getInt(Cursor cursor, int columnIndex)

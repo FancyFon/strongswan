@@ -18,9 +18,15 @@
 package org.strongswan.android.data;
 
 
+import android.content.res.Resources;
+import android.os.Bundle;
 import android.text.TextUtils;
 
+import org.strongswan.android.R;
+
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -30,6 +36,7 @@ public class VpnProfile implements Cloneable
 	/* While storing this as EnumSet would be nicer this simplifies storing it in a database */
 	public static final int SPLIT_TUNNELING_BLOCK_IPV4 = 1;
 	public static final int SPLIT_TUNNELING_BLOCK_IPV6 = 2;
+	public static final int DEFAULT_LOGGING_LEVEL = 1;
 
 	public static final int FLAGS_SUPPRESS_CERT_REQS = 1 << 0;
 	public static final int FLAGS_DISABLE_CRL = 1 << 1;
@@ -46,6 +53,12 @@ public class VpnProfile implements Cloneable
 	private VpnType mVpnType;
 	private UUID mUUID;
 	private long mId = -1;
+	private boolean byYubikey;
+	private String excludePackageNames;
+
+	private String mCertificateId;
+	private ArrayList<String> allowedApplications = new ArrayList<String>();
+	private int mLoggingLevel;
 
 	public enum SelectedAppsHandling
 	{
@@ -69,6 +82,11 @@ public class VpnProfile implements Cloneable
 	public VpnProfile()
 	{
 		this.mUUID = UUID.randomUUID();
+	}
+
+	public VpnProfile(Bundle bundle, Resources resources) {
+		this.mUUID = UUID.randomUUID();
+		fromBundle(bundle, resources);
 	}
 
 	public long getId()
@@ -333,6 +351,97 @@ public class VpnProfile implements Cloneable
 	public String toString()
 	{
 		return mName;
+	}
+
+	public ArrayList<String> getAllowedApplications() {
+		return allowedApplications;
+	}
+
+	public void setAllowedApplications(ArrayList<String> allowedApplications) {
+		this.allowedApplications = allowedApplications;
+	}
+
+	public String getCertificateId() {
+		return mCertificateId;
+	}
+
+	public void setCertificateId(String mCertificateId) {
+		this.mCertificateId = mCertificateId;
+	}
+
+
+	public int getLoggingLevel() {
+		return mLoggingLevel;
+	}
+
+	public void setLoggingLevel(int mLoggingLevel) {
+		this.mLoggingLevel = mLoggingLevel;
+	}
+
+	public boolean isByYubikey() {
+		return byYubikey;
+	}
+
+	public void setByYubikey(boolean byYubikey) {
+		this.byYubikey = byYubikey;
+	}
+
+	public String getExcludePackageNames() {
+		return excludePackageNames;
+	}
+
+	public List<String> getExcludePackageNameList() {
+		if (TextUtils.isEmpty(excludePackageNames)) {
+			return new ArrayList<>();
+		}
+
+		return Arrays.asList(excludePackageNames.split("\\s+"));
+	}
+
+	public void setExcludePackageNames(String excludePackageNames) {
+		this.excludePackageNames = excludePackageNames;
+	}
+
+	public void setExcludePackageNameList(List<String> packageNameList) {
+		if (packageNameList == null || packageNameList.isEmpty()) {
+			return;
+		}
+
+		excludePackageNames = TextUtils.join(" ", packageNameList);
+	}
+
+	public Bundle toBundle(Resources resources) {
+		Bundle bundle = new Bundle();
+		bundle.putLong(resources.getString(R.string.vpn_profile_bundle_id_key), getId());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_certificate_alias_key), getCertificateAlias());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_gateway_key), getGateway());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_name_key), getName());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_password_key), getPassword());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_type_key), getVpnType().name());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key), getUserCertificateAlias());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_username_key), getUsername());
+		bundle.putString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key), getCertificateId());
+		bundle.putStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications), getAllowedApplications());
+		bundle.putInt(resources.getString(R.string.vpn_profile_bundle_logging_level),getLoggingLevel());
+		bundle.putBoolean(resources.getString(R.string.vpn_profile_bundle_by_yubikey), isByYubikey());
+		bundle.putStringArrayList(resources.getString(R.string.vpn_profile_bundle_exclude_package_name), new ArrayList<>(getExcludePackageNameList()));
+		return bundle;
+	}
+
+	private void fromBundle(Bundle bundle, Resources resources) {
+		mId = bundle.getLong(resources.getString(R.string.vpn_profile_bundle_id_key));
+		mCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_alias_key));
+		mGateway = bundle.getString(resources.getString(R.string.vpn_profile_bundle_gateway_key));
+		mName = bundle.getString(resources.getString(R.string.vpn_profile_bundle_name_key));
+		mPassword = bundle.getString(resources.getString(R.string.vpn_profile_bundle_password_key));
+		mVpnType = VpnType.fromIdentifier(bundle.getString(resources.getString(R.string.vpn_profile_bundle_type_key)));
+		mUserCertificate = bundle.getString(resources.getString(R.string.vpn_profile_bundle_user_certificate_alias_key));
+		mUsername = bundle.getString(resources.getString(R.string.vpn_profile_bundle_username_key));
+		mCertificateId = bundle.getString(resources.getString(R.string.vpn_profile_bundle_certificate_id_key));
+		allowedApplications = bundle.getStringArrayList(resources.getString(R.string.vpn_profile_bundle_allowed_applications));
+		mLoggingLevel = bundle.getInt(resources.getString(R.string.vpn_profile_bundle_logging_level), DEFAULT_LOGGING_LEVEL);
+		byYubikey = bundle.getBoolean(resources.getString(R.string.vpn_profile_bundle_by_yubikey), false);
+		setExcludePackageNameList(bundle.getStringArrayList(resources.getString(R.string.vpn_profile_bundle_exclude_package_name)));
 	}
 
 	@Override

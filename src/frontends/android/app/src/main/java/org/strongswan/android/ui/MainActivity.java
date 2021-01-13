@@ -18,8 +18,11 @@
 package org.strongswan.android.ui;
 
 import android.app.Dialog;
+import android.app.PendingIntent;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.nfc.NfcAdapter;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
@@ -32,6 +35,7 @@ import org.strongswan.android.R;
 import org.strongswan.android.data.VpnProfile;
 import org.strongswan.android.logic.TrustedCertificateManager;
 import org.strongswan.android.ui.VpnProfileListFragment.OnVpnProfileSelectedListener;
+import org.strongswan.android.yubikey.StartYubiKeyVpn;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -49,6 +53,7 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 {
 	public static final String CONTACT_EMAIL = "android@strongswan.org";
 	public static final String EXTRA_CRL_LIST = "org.strongswan.android.CRL_LIST";
+	private static final int NO_FLAGS = 0;
 
 	/**
 	 * Use "bring your own device" (BYOD) features
@@ -73,6 +78,18 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 	}
 
 	@Override
+	protected void onResume() {
+		super.onResume();
+		startNfcAdapter();
+	}
+
+	@Override
+	protected void onPause() {
+		stopNfcAdapter();
+		super.onPause();
+	}
+
+	@Override
 	public boolean onCreateOptionsMenu(Menu menu)
 	{
 		getMenuInflater().inflate(R.menu.main, menu);
@@ -82,10 +99,10 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 	@Override
 	public boolean onPrepareOptionsMenu(Menu menu)
 	{
-		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT)
-		{
-			menu.removeItem(R.id.menu_import_profile);
-		}
+//		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT)
+//		{
+//			menu.removeItem(R.id.menu_import_profile);
+//		}
 		return true;
 	}
 
@@ -94,25 +111,25 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 	{
 		switch (item.getItemId())
 		{
-			case R.id.menu_import_profile:
-				Intent intent = new Intent(this, VpnProfileImportActivity.class);
-				startActivity(intent);
-				return true;
-			case R.id.menu_manage_certs:
-				Intent certIntent = new Intent(this, TrustedCertificatesActivity.class);
-				startActivity(certIntent);
-				return true;
-			case R.id.menu_crl_cache:
-				clearCRLs();
-				return true;
+//			case R.id.menu_import_profile:
+//				Intent intent = new Intent(this, VpnProfileImportActivity.class);
+//				startActivity(intent);
+//				return true;
+//			case R.id.menu_manage_certs:
+//				Intent certIntent = new Intent(this, TrustedCertificatesActivity.class);
+//				startActivity(certIntent);
+//				return true;
+//			case R.id.menu_crl_cache:
+//				clearCRLs();
+//				return true;
 			case R.id.menu_show_log:
 				Intent logIntent = new Intent(this, LogActivity.class);
 				startActivity(logIntent);
 				return true;
-			case R.id.menu_settings:
-				Intent settingsIntent = new Intent(this, SettingsActivity.class);
-				startActivity(settingsIntent);
-				return true;
+//			case R.id.menu_settings:
+//				Intent settingsIntent = new Intent(this, SettingsActivity.class);
+//				startActivity(settingsIntent);
+//				return true;
 			default:
 				return super.onOptionsItemSelected(item);
 		}
@@ -227,5 +244,26 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 			builder.setMessage(getActivity().getResources().getQuantityString(R.plurals.clear_crl_cache_msg, list.size(), list.size(), size));
 			return builder.create();
 		}
+	}
+
+	private void startNfcAdapter() {
+		NfcAdapter adapter = NfcAdapter.getDefaultAdapter(getApplicationContext());
+		if (adapter != null && !isDestroyed()) {
+			PendingIntent pendingIntent = PendingIntent.getActivity(getApplicationContext(), NO_FLAGS,
+					new Intent(this, StartYubiKeyVpn.class).
+							addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), NO_FLAGS);
+			IntentFilter ndef = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
+			ndef.addDataScheme("http");
+			ndef.addDataScheme("https");
+			adapter.enableForegroundDispatch(this, pendingIntent, new IntentFilter[] { ndef }, null);
+		}
+	}
+
+	private void stopNfcAdapter() {
+		NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(getApplicationContext());
+		if (nfcAdapter == null) {
+			return;
+		}
+		nfcAdapter.disableForegroundDispatch(this);
 	}
 }

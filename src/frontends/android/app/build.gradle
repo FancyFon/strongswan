@@ -9,6 +9,32 @@ android {
         targetSdkVersion 29
         versionCode 74
         versionName "2.3.2"
+
+        javaCompileOptions {
+            annotationProcessorOptions {
+                includeCompileClasspath true
+            }
+        }
+    }
+
+    lintOptions {
+        disable 'MissingTranslation'
+    }
+
+    flavorDimensions "default"
+
+    productFlavors {
+        strongswan {
+            applicationId "org.strongswan.android"
+            versionName "1.6.2"
+        }
+        fancyfon {
+            applicationId "com.fancyfon.strongswan"
+            versionName "1.6.1.0"
+            versionCode 48
+            setProperty("archivesBaseName", "strongswan_$versionName")
+
+        }
     }
 
     sourceSets.main {
@@ -27,7 +53,10 @@ android {
     }
 
     tasks.withType(JavaCompile) {
-        compileTask -> compileTask.dependsOn buildNative
+        compileTask ->
+            if(!project.hasProperty("native-disabled")) {
+//                compileTask.dependsOn buildNative
+            }
         options.compilerArgs << "-Xlint:unchecked" << "-Xlint:deprecation"
     }
 
@@ -55,4 +84,8 @@ dependencies {
     testImplementation 'org.powermock:powermock-core:2.0.2'
     testImplementation 'org.powermock:powermock-module-junit4:2.0.2'
     testImplementation 'org.powermock:powermock-api-mockito2:2.0.2'
+
+    //fancyfon libs
+    implementation project (':api')
+    implementation group: 'com.fancyfon.mobile.android.verification', name: 'Android_Caller_Verification_Library', version: '1.0.2'
 }
