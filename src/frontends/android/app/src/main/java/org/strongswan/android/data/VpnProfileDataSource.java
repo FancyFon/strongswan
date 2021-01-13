@@ -22,6 +22,7 @@ import android.content.Context;
 import android.database.Cursor;
 import android.database.SQLException;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.util.Log;
@@ -75,7 +76,7 @@ public class VpnProfileDataSource
 	private static final String TABLE_VPNPROFILE = "vpnprofile";
 	public static final String KEY_LOGGING_LEVEL="logging_level";
 
-	private static final int DATABASE_VERSION = 18;
+	private static final int DATABASE_VERSION = 19;
 
 	public static final DbColumn[] COLUMNS = new DbColumn[] {
 								new DbColumn(KEY_ID, "INTEGER PRIMARY KEY AUTOINCREMENT", 1),
@@ -100,7 +101,7 @@ public class VpnProfileDataSource
 								new DbColumn(KEY_FLAGS, "INTEGER", 14),
 								new DbColumn(KEY_IKE_PROPOSAL, "TEXT", 15),
 								new DbColumn(KEY_ESP_PROPOSAL, "TEXT", 15),
-								new DbColumn(KEY_DNS_SERVERS, "TEXT", 17),
+								new DbColumn(KEY_DNS_SERVERS, "TEXT", 19),
 								// fancyfon
 								new DbColumn(KEY_CERTIFICATE_ID, "TEXT", 17),
 								new DbColumn(KEY_ALLOWED_APPLICATIONS, "TEXT", 17),
@@ -262,10 +263,14 @@ public class VpnProfileDataSource
 					db.endTransaction();
 				}
 			}
-			if (oldVersion < 17)
+			if (oldVersion < 19)
 			{
-				db.execSQL("ALTER TABLE " + TABLE_VPNPROFILE + " ADD " + KEY_DNS_SERVERS +
-						   " TEXT;");
+				try {
+					db.execSQL("ALTER TABLE " + TABLE_VPNPROFILE + " ADD " + KEY_DNS_SERVERS +
+							" TEXT;");
+				} catch (SQLiteException e) {
+					// ignore
+				}
 			}
 			if (oldVersion < 17) {
 				db.execSQL("ALTER TABLE " + TABLE_VPNPROFILE + " ADD " + KEY_YUBIKEY +
