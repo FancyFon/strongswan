@@ -70,7 +70,7 @@ public class MainActivity extends AppCompatActivity implements OnVpnProfileSelec
 		ActionBar bar = getSupportActionBar();
 		bar.setDisplayShowHomeEnabled(true);
 		bar.setDisplayShowTitleEnabled(true);
-		bar.setTitle(R.string.app_name);
+		bar.setTitle(" " + getString(R.string.app_name));
 		bar.setIcon(R.drawable.branded_app_icon);
 
 		/* load CA certificates in a background task */
