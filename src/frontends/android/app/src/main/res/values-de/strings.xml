@@ -18,7 +18,7 @@
 <resources>
 
     <!-- Application -->
-    <string name="app_name">strongSwan VPN Client</string>
+    <string name="app_name">StrongSwan VPN Client</string>
     <string name="main_activity_name">strongSwan</string>
     <string name="show_log">Log anzeigen</string>
     <string name="search">Suchen</string>
